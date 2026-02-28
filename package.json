@@ -1,0 +1,40 @@
+{
+  "name": "cloudflare-parallel",
+  "version": "0.1.0",
+  "description": "Parallel computing primitives for Cloudflare Workers",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "parallel",
+    "multiprocessing",
+    "service-bindings",
+    "pmap",
+    "concurrency",
+    "distributed",
+    "serverless"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@cloudflare/workers-types": "^4.20240512.0",
+    "wrangler": "^3.60.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
+}
