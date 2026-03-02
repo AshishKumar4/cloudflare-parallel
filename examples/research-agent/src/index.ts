@@ -48,10 +48,14 @@ const SOURCES: SourceSpec[] = [
   },
 ];
 
-const researchFn = async (
+// Each isolate: fetch a source API, extract content, summarize via Workers AI.
+// `query` is injected as a module-level constant via pool context.
+// `env` is appended as the last argument via binding passthrough.
+const researchFn = async function (
+  this: unknown,
   spec: SourceSpec,
   env: { AI: Ai },
-): Promise<SourceResult> => {
+): Promise<SourceResult> {
   const t0 = Date.now();
 
   const resp = await fetch(spec.endpoint + encodeURIComponent(query));
@@ -94,56 +98,47 @@ const researchFn = async (
 
   if (!content.trim()) content = 'No relevant content found.';
 
-  const aiResult = await env.AI.run(
-    '@cf/meta/llama-3.1-8b-instruct' as BaseAiTextGenerationModels,
-    {
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Summarize the following content in 2-3 concise sentences. Be factual.',
-        },
-        {
-          role: 'user',
-          content: `Source: ${spec.name}\nQuery: "${query}"\n\nContent:\n${content.slice(0, 2000)}`,
-        },
-      ],
-      max_tokens: 256,
-    },
-  );
-
-  const summary =
-    typeof aiResult === 'object' && aiResult !== null && 'response' in aiResult
-      ? String((aiResult as Record<string, unknown>).response)
-      : String(aiResult);
+  const aiResult = (await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as BaseAiTextGenerationModels, {
+    messages: [
+      {
+        role: 'system',
+        content: 'Summarize the following content in 2-3 concise sentences. Be factual.',
+      },
+      {
+        role: 'user',
+        content: `Source: ${spec.name}\nQuery: "${query}"\n\nContent:\n${content.slice(0, 2000)}`,
+      },
+    ],
+    max_tokens: 256,
+  })) as { response?: string };
 
   return {
     source: spec.name,
     content: content.slice(0, 500),
-    summary: summary || 'No summary generated.',
+    summary: aiResult.response || 'No summary generated.',
     durationMs: Date.now() - t0,
   };
 };
 
-const synthesizeFn = async (a: string, b: string, env: { AI: Ai }): Promise<string> => {
-  const aiResult = await env.AI.run(
-    '@cf/meta/llama-3.1-8b-instruct' as BaseAiTextGenerationModels,
-    {
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Merge these two research summaries into one coherent paragraph. Preserve key facts from both.',
-        },
-        { role: 'user', content: `Summary A:\n${a}\n\nSummary B:\n${b}` },
-      ],
-      max_tokens: 512,
-    },
-  );
+const synthesizeFn = async function (
+  this: unknown,
+  a: string,
+  b: string,
+  env: { AI: Ai },
+): Promise<string> {
+  const aiResult = (await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as BaseAiTextGenerationModels, {
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Merge these two research summaries into one coherent paragraph. Preserve key facts.',
+      },
+      { role: 'user', content: `Summary A:\n${a}\n\nSummary B:\n${b}` },
+    ],
+    max_tokens: 512,
+  })) as { response?: string };
 
-  return typeof aiResult === 'object' && aiResult !== null && 'response' in aiResult
-    ? String((aiResult as Record<string, unknown>).response)
-    : String(aiResult);
+  return aiResult.response || '';
 };
 
 export default {
@@ -173,7 +168,7 @@ export default {
       return streamResults(pool, query, start);
     }
 
-    const results = await pool.map(researchFn, SOURCES, {
+    const results = await pool.map(researchFn as any, SOURCES, {
       onError: 'null',
       context: { query },
     });
@@ -181,7 +176,6 @@ export default {
     const sources = (results as (SourceResult | null)[]).filter(
       (r): r is SourceResult => r !== null,
     );
-
     const synthesis = await buildSynthesis(pool, query, sources);
 
     return Response.json({
@@ -205,10 +199,12 @@ async function streamResults(
   (async () => {
     const sources: SourceResult[] = [];
 
-    for await (const { index, value } of pool.mapStream(researchFn, SOURCES, {
-      context: { query },
-    })) {
-      sources.push(value);
+    for await (const { index, value } of pool.mapStream(
+      researchFn as any,
+      SOURCES,
+      { context: { query } },
+    )) {
+      sources.push(value as SourceResult);
       await writer.write(
         encoder.encode(
           `data: ${JSON.stringify({ type: 'source', index, result: value })}\n\n`,
@@ -248,7 +244,7 @@ async function buildSynthesis(
   if (sources.length === 1) return sources[0].summary;
 
   return pool.reduce(
-    synthesizeFn,
+    synthesizeFn as any,
     sources.map((s) => s.summary),
     `Research synthesis for: "${query}".`,
   );
