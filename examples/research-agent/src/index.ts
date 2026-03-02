@@ -25,6 +25,9 @@ interface ResearchBrief {
   totalDurationMs: number;
 }
 
+// Injected as module-level constant in each isolate via pool context.
+declare const query: string;
+
 const SOURCES: SourceSpec[] = [
   {
     name: 'Wikipedia',
@@ -51,11 +54,7 @@ const SOURCES: SourceSpec[] = [
 // Each isolate: fetch a source API, extract content, summarize via Workers AI.
 // `query` is injected as a module-level constant via pool context.
 // `env` is appended as the last argument via binding passthrough.
-const researchFn = async function (
-  this: unknown,
-  spec: SourceSpec,
-  env: { AI: Ai },
-): Promise<SourceResult> {
+const researchFn = async (spec: SourceSpec, env: { AI: Ai }): Promise<SourceResult> => {
   const t0 = Date.now();
 
   const resp = await fetch(spec.endpoint + encodeURIComponent(query));
@@ -98,7 +97,7 @@ const researchFn = async function (
 
   if (!content.trim()) content = 'No relevant content found.';
 
-  const aiResult = (await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as BaseAiTextGenerationModels, {
+  const aiResult = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
     messages: [
       {
         role: 'system',
@@ -110,23 +109,18 @@ const researchFn = async function (
       },
     ],
     max_tokens: 256,
-  })) as { response?: string };
+  });
 
   return {
     source: spec.name,
     content: content.slice(0, 500),
-    summary: aiResult.response || 'No summary generated.',
+    summary: (aiResult as { response?: string }).response || 'No summary generated.',
     durationMs: Date.now() - t0,
   };
 };
 
-const synthesizeFn = async function (
-  this: unknown,
-  a: string,
-  b: string,
-  env: { AI: Ai },
-): Promise<string> {
-  const aiResult = (await env.AI.run('@cf/meta/llama-3.1-8b-instruct' as BaseAiTextGenerationModels, {
+const synthesizeFn = async (a: string, b: string, env: { AI: Ai }): Promise<string> => {
+  const aiResult = await env.AI.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
     messages: [
       {
         role: 'system',
@@ -136,9 +130,9 @@ const synthesizeFn = async function (
       { role: 'user', content: `Summary A:\n${a}\n\nSummary B:\n${b}` },
     ],
     max_tokens: 512,
-  })) as { response?: string };
+  });
 
-  return aiResult.response || '';
+  return (aiResult as { response?: string }).response || '';
 };
 
 export default {

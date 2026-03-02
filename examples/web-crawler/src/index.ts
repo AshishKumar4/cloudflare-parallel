@@ -150,6 +150,7 @@ async function crawl(
   const visited = new Set<string>();
   const pagesPerDepth: Record<number, number> = {};
 
+  const seedOrigin = new URL(seedUrl).origin;
   let frontier: string[] = [seedUrl];
   let currentDepth = 0;
 
@@ -179,7 +180,6 @@ async function crawl(
         status: result.status,
       };
 
-      const seedOrigin = new URL(seedUrl).origin;
       for (const link of result.links) {
         edges.push([result.url, link]);
 
