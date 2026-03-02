@@ -1,8 +1,3 @@
-/**
- * Structured error types for cloudflare-parallel.
- */
-
-/** Base error for all library errors. */
 export class ParallelError extends Error {
   constructor(message: string) {
     super(message);
@@ -10,7 +5,6 @@ export class ParallelError extends Error {
   }
 }
 
-/** Thrown when a function cannot be serialized for remote execution. */
 export class SerializationError extends ParallelError {
   constructor(message: string) {
     super(message);
@@ -18,14 +12,8 @@ export class SerializationError extends ParallelError {
   }
 }
 
-/**
- * Thrown when the remote isolate fails to execute the task.
- * Wraps errors from inside the dynamic Worker.
- */
 export class ExecutionError extends ParallelError {
-  /** The original error message from the remote isolate. */
   readonly remoteMessage: string;
-  /** The stack trace from the remote isolate, if available. */
   readonly remoteStack?: string;
 
   constructor(message: string, remoteStack?: string) {
@@ -36,7 +24,6 @@ export class ExecutionError extends ParallelError {
   }
 }
 
-/** Thrown when a task exceeds its deadline. */
 export class TimeoutError extends ParallelError {
   readonly deadlineMs: number;
 
@@ -47,14 +34,8 @@ export class TimeoutError extends ParallelError {
   }
 }
 
-/**
- * Thrown when all retry attempts for a task have been exhausted.
- * Contains the last error encountered and the number of attempts made.
- */
 export class RetryExhaustedError extends ParallelError {
-  /** The last error that caused the final retry to fail. */
   readonly lastError: Error;
-  /** Total number of attempts made (initial + retries). */
   readonly attempts: number;
 
   constructor(attempts: number, lastError: Error) {
@@ -67,7 +48,6 @@ export class RetryExhaustedError extends ParallelError {
   }
 }
 
-/** Thrown when the Worker Loader binding is missing or misconfigured. */
 export class BindingError extends ParallelError {
   constructor(message: string) {
     super(message);

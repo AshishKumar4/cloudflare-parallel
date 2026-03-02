@@ -1,27 +1,7 @@
-/**
- * Purity primitives for function validation and annotation.
- */
-
 import { SerializationError } from './errors.js';
 
-// ── Pure ────────────────────────────────────────────────────────────
-
-/** Branded type marking a function as verified-pure. */
 export type Pure<F> = F & { readonly __pure: true };
 
-/**
- * Validate and brand a function as pure.
- *
- * Checks:
- *  - Must be a function.
- *  - Source must not contain `[native code]`.
- *  - Source must not reference `this` (cannot survive serialization).
- *
- * The returned value is the same function reference with a `__pure`
- * brand attached. Use `isPure()` to check the brand at runtime.
- *
- * @throws {SerializationError} If the function fails validation.
- */
 export function pure<F extends Function>(fn: F): Pure<F> {
   if (typeof fn !== 'function') {
     throw new SerializationError(
@@ -55,28 +35,13 @@ export function pure<F extends Function>(fn: F): Pure<F> {
   return branded;
 }
 
-/**
- * Check if a function has been branded as pure via `pure()`.
- */
 export function isPure(fn: Function): fn is Pure<typeof fn> {
   return (fn as any).__pure === true;
 }
 
-// ── Constant ────────────────────────────────────────────────────────
-
 /**
  * Identity function that signals a value is intended as a serializable
- * constant for remote execution.
- *
- * At runtime this is a no-op -- it returns the value unchanged.
- * Its purpose is documentation and intent signaling: values marked
- * with `constant()` are meant to be passed as explicit arguments
- * rather than captured via closure.
- *
- * ```ts
- * const threshold = constant(0.5);
- * pool.submit((x: number, t: number) => x > t ? 1 : 0, value, threshold);
- * ```
+ * constant for remote execution. No-op at runtime.
  */
 export function constant<T>(value: T): T {
   return value;
