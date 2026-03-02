@@ -47,6 +47,26 @@ export class TimeoutError extends ParallelError {
   }
 }
 
+/**
+ * Thrown when all retry attempts for a task have been exhausted.
+ * Contains the last error encountered and the number of attempts made.
+ */
+export class RetryExhaustedError extends ParallelError {
+  /** The last error that caused the final retry to fail. */
+  readonly lastError: Error;
+  /** Total number of attempts made (initial + retries). */
+  readonly attempts: number;
+
+  constructor(attempts: number, lastError: Error) {
+    super(
+      `Task failed after ${attempts} attempt(s): ${lastError.message}`,
+    );
+    this.name = 'RetryExhaustedError';
+    this.attempts = attempts;
+    this.lastError = lastError;
+  }
+}
+
 /** Thrown when the Worker Loader binding is missing or misconfigured. */
 export class BindingError extends ParallelError {
   constructor(message: string) {

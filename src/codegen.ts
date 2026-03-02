@@ -5,12 +5,40 @@
  * Worker Loader API. Each generated module exports a default class
  * extending `WorkerEntrypoint` with an `execute(...args)` RPC method
  * that runs the serialized user function.
+ *
+ * Supports two optional enhancements:
+ * - **Context injection**: Module-level `const` declarations for captured
+ *   closure variables, so the function body can reference them naturally.
+ * - **Binding passthrough**: Appends `this.env` as the last argument to the
+ *   user function, giving it access to forwarded KV/R2/AI/etc. bindings.
  */
 
 import type { WorkerCode } from './types.js';
 
 /** Default compatibility date for generated workers. */
 const DEFAULT_COMPAT_DATE = '2025-06-01';
+
+/**
+ * Options that control what gets embedded in the generated module source.
+ */
+export interface GenerateSourceOptions {
+  /**
+   * Key/value pairs to inject as module-level constants.
+   * Each entry becomes `const <key> = <JSON.stringify(value)>;` before
+   * the function declaration, so the function body can reference them
+   * as if they were in closure scope.
+   *
+   * Values must be JSON-serializable.
+   */
+  context?: Record<string, unknown>;
+
+  /**
+   * When `true`, the generated `execute()` method appends `this.env`
+   * as the last argument to the user function. This is enabled
+   * automatically when the pool is configured with `bindings`.
+   */
+  passEnv?: boolean;
+}
 
 /**
  * Generate the ES module source for a dynamic executor worker.
@@ -20,37 +48,57 @@ const DEFAULT_COMPAT_DATE = '2025-06-01';
  * ```js
  * import { WorkerEntrypoint } from "cloudflare:workers";
  *
+ * // (optional) context constants
+ * const multiplier = 3;
+ *
  * const __fn__ = <serialized function source>;
  *
  * export default class extends WorkerEntrypoint {
  *   execute(...args) {
- *     return __fn__(...args);
+ *     return __fn__(...args);             // without env
+ *     return __fn__(...args, this.env);   // with env passthrough
  *   }
  * }
  * ```
  *
- * The function source is embedded directly as a JS expression, not
- * eval'd -- the Worker Loader loads it as a native ES module.
- *
  * @param fnSource - The serialized function source (from `fn.toString()`).
  *                   Must be a valid JS expression that produces a function.
+ * @param opts     - Optional context injection and env passthrough settings.
  */
-export function generateWorkerSource(fnSource: string): string {
-  // The function source from fn.toString() produces either:
-  //   - Arrow:     "(x) => x * x"  or  "async (x) => { ... }"
-  //   - Function:  "function foo(x) { ... }"  or  "async function(x) { ... }"
-  //
-  // Both are valid as the RHS of `const __fn__ = <source>;`
-  // Arrow functions are expressions. Named function declarations become
-  // function expressions when used as an assignment RHS.
-  return [
+export function generateWorkerSource(
+  fnSource: string,
+  opts?: GenerateSourceOptions,
+): string {
+  const lines: string[] = [
     'import { WorkerEntrypoint } from "cloudflare:workers";',
     '',
-    `const __fn__ = ${fnSource};`,
-    '',
+  ];
+
+  // ── Context injection ───────────────────────────────────────────
+  // Emit module-level constants so the function body can reference
+  // captured variables naturally (e.g. `multiplier` instead of `ctx.multiplier`).
+  if (opts?.context) {
+    for (const [key, value] of Object.entries(opts.context)) {
+      lines.push(`const ${key} = ${JSON.stringify(value)};`);
+    }
+    lines.push('');
+  }
+
+  // ── Function declaration ────────────────────────────────────────
+  lines.push(`const __fn__ = ${fnSource};`);
+  lines.push('');
+
+  // ── Entrypoint class ────────────────────────────────────────────
+  // When passEnv is true, append `this.env` so the user function
+  // receives the forwarded bindings as its last argument.
+  const callExpr = opts?.passEnv
+    ? '__fn__(...args, this.env)'
+    : '__fn__(...args)';
+
+  lines.push(
     'export default class extends WorkerEntrypoint {',
     '  execute(...args) {',
-    '    const result = __fn__(...args);',
+    `    const result = ${callExpr};`,
     '    // Transparently await async/promise-returning functions.',
     '    if (result instanceof Promise) {',
     '      return result;',
@@ -58,7 +106,9 @@ export function generateWorkerSource(fnSource: string): string {
     '    return result;',
     '  }',
     '}',
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
 /**
@@ -83,15 +133,17 @@ export interface WorkerCodeOptions {
 /**
  * Build a complete `WorkerCode` descriptor for the Worker Loader.
  *
- * @param fnSource - Serialized function source string.
- * @param opts - Optional configuration for the dynamic worker.
+ * @param fnSource    - Serialized function source string.
+ * @param opts        - Optional configuration for the dynamic worker.
+ * @param sourceOpts  - Optional context/env passthrough for source generation.
  * @returns A `WorkerCode` ready to pass to `loader.get()`.
  */
 export function buildWorkerCode(
   fnSource: string,
   opts?: WorkerCodeOptions,
+  sourceOpts?: GenerateSourceOptions,
 ): WorkerCode {
-  const moduleSource = generateWorkerSource(fnSource);
+  const moduleSource = generateWorkerSource(fnSource, sourceOpts);
 
   return {
     compatibilityDate: opts?.compatibilityDate ?? DEFAULT_COMPAT_DATE,

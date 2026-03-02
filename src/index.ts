@@ -28,7 +28,17 @@
 // ── Core ────────────────────────────────────────────────────────────
 
 export { WorkerPool } from './pool.js';
-export type { PoolOptions, MapOptions, PmapOptions } from './pool.js';
+export type {
+  PoolOptions,
+  MapOptions,
+  PmapOptions,
+  SubmitOptions,
+  StreamOptions,
+  StreamResult,
+  ScatterOptions,
+  ResilienceOptions,
+  OnErrorStrategy,
+} from './pool.js';
 
 // ── Primitives ──────────────────────────────────────────────────────
 
@@ -42,7 +52,7 @@ export { serializeFunction, hashSource } from './serialize.js';
 // ── Code generation ─────────────────────────────────────────────────
 
 export { generateWorkerSource, buildWorkerCode } from './codegen.js';
-export type { WorkerCodeOptions } from './codegen.js';
+export type { WorkerCodeOptions, GenerateSourceOptions } from './codegen.js';
 
 // ── Errors ──────────────────────────────────────────────────────────
 
@@ -51,6 +61,7 @@ export {
   SerializationError,
   ExecutionError,
   TimeoutError,
+  RetryExhaustedError,
   BindingError,
 } from './errors.js';
 
