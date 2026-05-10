@@ -1,0 +1,280 @@
+{
+  "target": "wrangler-dev-local",
+  "ts": "2026-05-10T00:34:57.814Z",
+  "summary": {
+    "total": 31,
+    "passed": 31,
+    "failed": 0
+  },
+  "results": [
+    {
+      "name": "pool/submit",
+      "ok": true,
+      "ms": 13
+    },
+    {
+      "name": "pool/map size=4",
+      "ok": true,
+      "ms": 7,
+      "data": {
+        "topology": "in-do",
+        "fanOutPerLevel": [
+          4
+        ],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "pool/map size=8",
+      "ok": true,
+      "ms": 13,
+      "data": {
+        "topology": "hybrid",
+        "fanOutPerLevel": [
+          2,
+          4,
+          4
+        ],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "pool/map size=16",
+      "ok": true,
+      "ms": 50,
+      "data": {
+        "topology": "hybrid",
+        "fanOutPerLevel": [
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "pool/map size=32",
+      "ok": true,
+      "ms": 45,
+      "data": {
+        "topology": "hybrid",
+        "fanOutPerLevel": [
+          8,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "pool/map size=64",
+      "ok": true,
+      "ms": 111,
+      "data": {
+        "topology": "hybrid",
+        "fanOutPerLevel": [
+          16,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "pool/map size=128",
+      "ok": true,
+      "ms": 160,
+      "data": {
+        "topology": "hybrid",
+        "fanOutPerLevel": [
+          32,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4,
+          4
+        ],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "pool/scatter",
+      "ok": true,
+      "ms": 7
+    },
+    {
+      "name": "pool/reduce",
+      "ok": true,
+      "ms": 3
+    },
+    {
+      "name": "pool/pmap",
+      "ok": true,
+      "ms": 9
+    },
+    {
+      "name": "pool/pipe",
+      "ok": true,
+      "ms": 13
+    },
+    {
+      "name": "pool/mapStream",
+      "ok": true,
+      "ms": 4
+    },
+    {
+      "name": "pool/mapOrdered",
+      "ok": true,
+      "ms": 4
+    },
+    {
+      "name": "pool/cancel (mid-flight)",
+      "ok": true,
+      "ms": 5
+    },
+    {
+      "name": "pool/stats",
+      "ok": true,
+      "ms": 1,
+      "data": {
+        "topology": "in-do",
+        "fanOutPerLevel": [],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "actor/inc 1",
+      "ok": true,
+      "ms": 15
+    },
+    {
+      "name": "actor/inc 2",
+      "ok": true,
+      "ms": 4
+    },
+    {
+      "name": "actor/inc 3",
+      "ok": true,
+      "ms": 3
+    },
+    {
+      "name": "actor/state",
+      "ok": true,
+      "ms": 6
+    },
+    {
+      "name": "actor/close",
+      "ok": true,
+      "ms": 6
+    },
+    {
+      "name": "scheduler/enqueue",
+      "ok": true,
+      "ms": 15
+    },
+    {
+      "name": "scheduler/result",
+      "ok": true,
+      "ms": 4
+    },
+    {
+      "name": "scheduler/enqueue idem",
+      "ok": true,
+      "ms": 5
+    },
+    {
+      "name": "scheduler/stats",
+      "ok": true,
+      "ms": 4,
+      "data": {
+        "topology": "in-do",
+        "fanOutPerLevel": [],
+        "treeDepth": 1
+      }
+    },
+    {
+      "name": "scheduler/configure",
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "name": "scheduler/cancel-tenant",
+      "ok": true,
+      "ms": 5
+    },
+    {
+      "name": "vm POST (no auth) → 401",
+      "ok": true,
+      "ms": 3
+    },
+    {
+      "name": "vm POST (with auth) → 200",
+      "ok": true,
+      "ms": 7
+    },
+    {
+      "name": "loader-only/map",
+      "ok": true,
+      "ms": 2
+    },
+    {
+      "name": "errors/timeout (TimeoutError)",
+      "ok": true,
+      "ms": 205
+    },
+    {
+      "name": "errors/aggregate (AggregateExecutionError)",
+      "ok": true,
+      "ms": 7
+    }
+  ]
+}

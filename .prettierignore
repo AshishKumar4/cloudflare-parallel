@@ -1,0 +1,6 @@
+dist/
+node_modules/
+.wrangler/
+bun.lock
+package-lock.json
+*.md

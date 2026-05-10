@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-typecheck-test-bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Format check
+        run: bun run format:check
+      - name: Lint
+        run: bun run lint
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Unit tests
+        run: bun test tests/unit
+      - name: Bench (perf gates)
+        run: bun run bench
+      - name: Build
+        run: bun run build
+      - name: Bundle size budget
+        # Fail if packed size exceeds 250 KB or unpacked exceeds 1 MB.
+        # Bump the budget deliberately if a v0.x addition warrants it.
+        run: |
+          OUT=$(npm pack --dry-run --json | tee /tmp/pack.json)
+          PACKED=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pack.json','utf8'))[0].size)")
+          UNPACKED=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pack.json','utf8'))[0].unpackedSize)")
+          echo "packed=$PACKED unpacked=$UNPACKED"
+          if [ "$PACKED" -gt 256000 ]; then echo "FAIL: packed > 250 KB"; exit 1; fi
+          if [ "$UNPACKED" -gt 1048576 ]; then echo "FAIL: unpacked > 1 MB"; exit 1; fi
+      - name: Integration (skipped without Wrangler creds)
+        env:
+          SKIP_INTEGRATION: '1'
+        run: bun run test:integration
+
+  prod-tests:
+    # Substrate validation against the public cf-mp-vm reference worker.
+    # No deploy step needed — cf-mp-vm is a stable test target. If you
+    # want to point at a different deployment, set CFP_PROD_BASE.
+    # Forks can run this; the job is fail-tolerant on transient network
+    # issues (treated as informational).
+    runs-on: ubuntu-latest
+    needs: lint-typecheck-test-bench
+    env:
+      CFP_PROD_BASE: ${{ vars.CFP_PROD_BASE || 'https://cf-mp-vm.ashishkumarsingh.com' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Live substrate tests (cf-mp-vm)
+        run: bun run test:prod
+        continue-on-error: true

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.js.map
+.wrangler/
+.env
+.env.*
+.dev.vars
+*.log
+.DS_Store
+coverage/
+examples/*/node_modules/
+examples/*/dist/
+examples/*/.wrangler/

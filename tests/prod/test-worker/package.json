@@ -1,0 +1,16 @@
+{
+  "name": "cloudflare-parallel-prod-tests-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --ip 0.0.0.0 --port 8787"
+  },
+  "dependencies": {
+    "cloudflare-parallel": "file:../../../"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240512.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,0 +1,23 @@
+name = "web-crawler"
+main = "src/index.ts"
+compatibility_date = "2026-01-20"
+compatibility_flags = ["nodejs_compat"]
+
+[[worker_loaders]]
+binding = "LOADER"
+
+[[durable_objects.bindings]]
+name = "CfpCoordinator"
+class_name = "CfpCoordinator"
+
+[[durable_objects.bindings]]
+name = "CfpWorkerDO"
+class_name = "CfpWorkerDO"
+
+[[durable_objects.bindings]]
+name = "CfpSubCoord"
+class_name = "CfpSubCoord"
+
+[[migrations]]
+tag = "v1-cfp"
+new_sqlite_classes = ["CfpCoordinator", "CfpWorkerDO", "CfpSubCoord"]
