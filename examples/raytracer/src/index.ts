@@ -31,6 +31,10 @@ interface Env {
   CfpSubCoord: DurableObjectNamespace;
 }
 
+interface CtxWithExports extends ExecutionContext {
+  exports?: { CfpInProcessCoordinator?: unknown };
+}
+
 interface TileSpec {
   y0: number;
   y1: number;
@@ -40,7 +44,7 @@ interface TileSpec {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname !== '/' && url.pathname !== '/render') {
       return Response.json({
@@ -55,7 +59,12 @@ export default {
     const tiles = Math.min(Number(url.searchParams.get('tiles') ?? 8), 128);
     const spp = Math.min(Number(url.searchParams.get('spp') ?? 1), 8);
 
-    const pool = Parallel.pool(env);
+    const pool = Parallel.pool(env, {
+      inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
+        | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
+        | undefined,
+      requestColo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
+    });
 
     // Slice the image into `tiles` horizontal stripes.
     const rowsPerTile = Math.ceil(h / tiles);

@@ -32,6 +32,10 @@ interface Env {
   CfpSubCoord: DurableObjectNamespace;
 }
 
+interface CtxWithExports extends ExecutionContext {
+  exports?: { CfpInProcessCoordinator?: unknown };
+}
+
 interface City {
   id: number;
   x: number;
@@ -63,7 +67,7 @@ function randomTour(n: number, seed: number): number[] {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname !== '/' && url.pathname !== '/run') {
       return Response.json({
@@ -75,7 +79,14 @@ export default {
     const popSize = Math.min(Number(url.searchParams.get('pop') ?? 64), 512);
     const cities = Math.min(Number(url.searchParams.get('cities') ?? 50), 200);
 
-    const pool = Parallel.pool(env);
+    const pool = Parallel.pool(env, {
+      // Loopback for size-≤4 fan-outs; prewarmed loaded isolate.
+      inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
+        | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
+        | undefined,
+      // Colocate leaf DOs with this colo.
+      requestColo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
+    });
     const map = buildCities(cities);
 
     let population = Array.from({ length: popSize }, (_, i) => randomTour(cities, i + 1));

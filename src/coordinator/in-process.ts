@@ -55,7 +55,16 @@ export class CfpInProcessCoordinator extends WorkerEntrypoint<InProcessCoordinat
   async runOne(request: CoordinatorRunRequest): Promise<RunOneResult> {
     const runner = new LoaderRunner({
       loader: this.env.LOADER,
-      callSite: 'fetch-handler',
+      // `'do-method'` (cap = 4 concurrent loaders), NOT `'fetch-handler'`
+      // (cap = 3). The loopback is a `WorkerEntrypoint` invoked via
+      // `ctx.exports`, which is semantically a DO-method-equivalent
+      // dispatch surface — the call lands inside an isolate that's
+      // already been spun up, not a fresh `fetch` event handler. Using
+      // the fetch-handler cap here silently caps N=4 fan-out at 3
+      // concurrent loaders + 1 queued, costing ~25% of the achievable
+      // parallelism and surfacing as a "N=4 is barely faster than
+      // sequential" complaint.
+      callSite: 'do-method',
       cacheKeyStrategy: request.cacheKeyStrategy ?? 'stable',
       workerOptions: wireToWorkerOptions(
         request.workerOptions,
@@ -97,7 +106,9 @@ export class CfpInProcessCoordinator extends WorkerEntrypoint<InProcessCoordinat
     }
     const runner = new LoaderRunner({
       loader: this.env.LOADER,
-      callSite: 'fetch-handler',
+      // See `runOne` for the rationale — `'do-method'` is the correct
+      // cap for the loopback's dispatch surface.
+      callSite: 'do-method',
       cacheKeyStrategy: request.cacheKeyStrategy ?? 'stable',
       workerOptions: wireToWorkerOptions(
         request.workerOptions,

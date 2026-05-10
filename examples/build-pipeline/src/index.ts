@@ -37,6 +37,10 @@ interface Env {
   CfpSubCoord: DurableObjectNamespace;
 }
 
+interface CtxWithExports extends ExecutionContext {
+  exports?: { CfpInProcessCoordinator?: unknown };
+}
+
 interface SrcFile {
   id: number;
   name: string;
@@ -78,7 +82,7 @@ function genSource(id: number): string {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname !== '/' && url.pathname !== '/build') {
       return Response.json({
@@ -86,7 +90,15 @@ export default {
       });
     }
     const files = Math.min(Number(url.searchParams.get('files') ?? 64), 1024);
-    const pool = Parallel.pool(env);
+    const pool = Parallel.pool(env, {
+      // Skip the DO hop for size-≤4 fan-outs. Loaded isolate is
+      // prewarmed automatically (autoWarm: true by default).
+      inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
+        | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
+        | undefined,
+      // Colocate freshly-created leaf DOs with this colo.
+      requestColo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
+    });
 
     // Build the input list. The source string is generated in the parent
     // (cheap) and shipped to each isolate.

@@ -440,7 +440,26 @@ const pool = Parallel.pool(env, {
 });
 ```
 
-The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed test worker with separate cold-run / warm-run reporting and equal warmup for both paths.
+The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed test worker with separate cold-run / warm-run reporting, equal warmup for both paths, and a median-of-5 sampling contract.
+
+### Observed speedup curve
+
+Live numbers from the deployed test worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`):
+
+| Size | Topology | Per-tile (warm) | Parallel wall (warm) | Speedup |
+|-----:|----------|----------------:|---------------------:|--------:|
+|    4 | `in-do`  |          ~180 ms |               ~890 ms |  ~1×    |
+|   16 | `hybrid` |          ~170 ms |               ~2.7 s  |  ~1×    |
+|   64 | `hybrid` |          ~180 ms |               ~2.8 s  |  ~4×    |
+|  128 | `hybrid` |          ~170 ms |               ~3.0 s  |  ~7×    |
+|  256 | `tree`   |          ~180 ms |               ~3.0 s  | ~15×    |
+|  512 | `tree`   |          ~180 ms |               ~5.4 s  | ~17×    |
+
+GA (heavy N-body fitness eval) hits **94× at N=512** with `tree` topology (depth=3); Monte Carlo hits **30× at N=256**.
+
+**Why small-N doesn't show 4× speedup.** The Worker Loader caches isolates by ID (per [the public API](https://developers.cloudflare.com/dynamic-workers/api-reference/#get)): concurrent `get(sameId)` calls return the SAME loaded isolate, and tasks run sequentially on that single V8 context. The library's parallelism unlocks at the **leaf-DO tier** — `hybrid` and `tree` topologies fan out across N independent leaf DOs, each with its own isolate. At N ≤ 4 (the `in-do` topology) all tasks share one isolate, so the per-tile CPU sums sequentially even though dispatch is parallel; the library's contribution there is no worse than running inline. To get genuine 4-way parallelism at N=4, pass `freshIsolate: true` per submit — but the per-call loader spin-up usually outweighs the win at that scale.
+
+The library shines at **N ≥ 64**: each leaf DO runs its own batch in its own isolate, and the speedup is roughly `N / 4` minus dispatch overhead. At N ≥ 256 the tree topology multiplies leaf count further.
 
 ### Cache key strategy
 

@@ -496,6 +496,15 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
           result.push(sampleResult);
           stats = { topology: 'sequential-sample', treeDepth: 0, fanOutPerLevel: [] };
         } else {
+          // Note on `freshIsolate`: empirically tested with both
+          // settings. With `freshIsolate: false` (default), the Worker
+          // Loader caches the isolate by ID, so multiple concurrent
+          // `runOne` calls in the same leaf share one isolate — fine
+          // for the hybrid/tree topology where 4N parallelism comes
+          // from N independent leaf DOs each running their own loaded
+          // isolate. `freshIsolate: true` at the in-do tier pays
+          // loader spin-up per call (~1s) which outweighs the
+          // 4-way-parallel-CPU win for small N. Stick with the cache.
           result = await pool.map(renderTile, slabs);
           const s = await pool.stats();
           stats = {
@@ -579,6 +588,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
           perTaskSampleMs = Date.now() - ts0;
           stats = { topology: 'sequential-sample', treeDepth: 0, fanOutPerLevel: [] };
         } else {
+          // See mandelbrot above for `freshIsolate` rationale — stable
+          // cache reuses one isolate per leaf, which is the right
+          // trade-off here.
           results = await pool.map(throwDarts, items);
           const s = await pool.stats();
           stats = {
@@ -901,6 +913,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
           perTaskSampleMs = Date.now() - ts0;
           stats = { topology: 'sequential-sample', treeDepth: 0, fanOutPerLevel: [] };
         } else {
+          // See mandelbrot above for `freshIsolate` rationale.
           results = await pool.map(evalCandidate, items);
           const s = await pool.stats();
           stats = {

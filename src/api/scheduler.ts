@@ -2,6 +2,10 @@ import { BindingError, MissingBindingError, ResultExpiredError } from '../errors
 import { hashSource, serializeFunction } from '../loader/serialize';
 import { wireToError } from './error-decode';
 import { emitObservabilityEvent } from '../observability/index';
+import {
+  locationHintForColo,
+  type LocationHint,
+} from '../coordinator/internal';
 import type {
   Job,
   JobHandle,
@@ -12,6 +16,12 @@ import type {
   SchedulerStats,
 } from './options';
 import type { SchedulerEnqueueRequest } from '../scheduler/scheduler-do';
+
+// Local minimal shape — same as in `pool.ts`/`actor.ts`. Runtime accepts
+// the shape; the @cloudflare/workers-types version-pin is loose here.
+interface DurableObjectNamespaceGetDurableObjectOptions {
+  locationHint?: LocationHint;
+}
 
 interface SchedulerStub {
   enqueue(req: SchedulerEnqueueRequest): Promise<{ id: string }>;
@@ -83,6 +93,7 @@ export class Scheduler<B extends Record<string, unknown>, C extends Record<strin
   implements IScheduler<B, C> {
   readonly #env: PoolEnv;
   readonly #opts: SchedulerOptions<B, C>;
+  readonly #locationHint: LocationHint | undefined;
 
   constructor(env: PoolEnv, opts: SchedulerOptions<B, C>) {
     if (!env.LOADER || typeof env.LOADER.get !== 'function') {
@@ -96,11 +107,28 @@ export class Scheduler<B extends Record<string, unknown>, C extends Record<strin
     }
     this.#env = env;
     this.#opts = opts;
+    // Same auto-derivation as the Pool / Actor: explicit `locationHint`
+    // wins, else derive from `requestColo`. SchedulerDO is sticky — the
+    // hint is honored only on first access, so this fixes placement at
+    // Scheduler construction time.
+    this.#locationHint = opts.locationHint ?? locationHintForColo(opts.requestColo);
   }
 
   #stub(): SchedulerStub {
     const ns = this.#env.CfpSchedulerDO!;
-    return ns.get(ns.idFromName(this.#opts.id)) as unknown as SchedulerStub;
+    const id = ns.idFromName(this.#opts.id);
+    const stub = this.#locationHint
+      ? (ns as DurableObjectNamespace & {
+          get(
+            id: DurableObjectId,
+            opts?: DurableObjectNamespaceGetDurableObjectOptions,
+          ): DurableObjectStub;
+        }).get(
+          id,
+          { locationHint: this.#locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions,
+        )
+      : ns.get(id);
+    return stub as unknown as SchedulerStub;
   }
 
   /**

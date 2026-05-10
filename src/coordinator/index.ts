@@ -1,5 +1,5 @@
 export { CfpCoordinator } from './coordinator';
-export { CfpWorkerDO, CfpWorkerDOEntry, WorkerDOSession } from './worker-do';
+export { CfpWorkerDO, WorkerDOSession } from './worker-do';
 export { CfpSubCoord, SubCoordSession } from './sub-coordinator';
 export { CfpInProcessCoordinator } from './in-process';
 export type { CoordinatorEnv, CoordinatorRunRequest, CoordinatorFanOutRequest } from './coordinator';

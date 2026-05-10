@@ -272,9 +272,27 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
   }
 
   /**
-   * Fire a `noop()` to the Coordinator DO. Returns the in-flight promise
-   * (or starts one) so concurrent callers share a single prewarm round-trip.
-   * No-op when the in-process loopback is in play (no DO to warm).
+   * Fire a prewarm in parallel with the first real dispatch. Returns the
+   * in-flight promise (or starts one) so concurrent callers share a
+   * single prewarm round-trip.
+   *
+   * Two paths depending on what's wired:
+   *
+   * - **DO path** (default): send `noop()` to the Coordinator DO. The
+   *   first call after a quiescence pays the ~300–400 ms DO cold-start;
+   *   firing noop in parallel with the real dispatch absorbs that cost
+   *   off the critical path.
+   * - **Loopback path** (`inProcess` set): there's no DO to warm, but
+   *   the loaded isolate inside the loopback still pays the loader
+   *   cold-start on first call. Fire a single no-op `runOne` through
+   *   the loopback to spin up the isolate. Subsequent calls reuse it
+   *   via the stable cache key. Without this, every "first call after
+   *   idle" in the loopback path paid full cold-start, surfacing as
+   *   run-to-run inconsistency (the user-reported "the numbers change
+   *   every time I refresh" complaint).
+   *
+   * The prewarm is fire-and-forget at the call sites (`void
+   * this.#ensurePrewarm()`) so it never serializes the real dispatch.
    *
    * @param force when `true`, fires the prewarm even if `autoWarm: false`.
    *   Used by `Pool.warm()` (explicit user request). The dispatch path
@@ -282,18 +300,70 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
    */
   #ensurePrewarm(force = false): Promise<void> {
     if (!force && !this.#autoWarm) return Promise.resolve();
-    if (this.#inProcess) return Promise.resolve();
     if (this.#prewarmFlight) return this.#prewarmFlight;
-    const stub = this.#stub() as unknown as { noop?: () => Promise<void> };
+    if (this.#inProcess) {
+      // Loopback path: prime the loaded isolate with a tiny no-op
+      // submit. The fn returns `undefined` and has zero CPU; the only
+      // work is the loader-isolate spin-up, which is exactly what we
+      // want to pay off the critical path.
+      this.#prewarmFlight = this.#primeInProcessIsolate();
+      return this.#prewarmFlight;
+    }
+    const stub = this.#stub();
     this.#prewarmFlight = (async () => {
       try {
-        await stub.noop?.();
+        await stub.noop();
       } catch {
         // Prewarm is best-effort. The real dispatch will surface any
         // genuine connectivity issue immediately afterwards.
       }
     })();
     return this.#prewarmFlight;
+  }
+
+  /**
+   * Loopback-path prewarm: fire a single no-op `runOne` so the
+   * Worker Loader spins the isolate up. We bypass `pool.submit` (which
+   * would loop back through `#ensurePrewarm` and deadlock) and bypass
+   * resilience wrapping (a single timeout-free best-effort call is the
+   * right shape for prewarm). The fn's source is the no-op `() => 0`;
+   * it pays zero user-fn CPU. Errors are swallowed — same best-effort
+   * contract as the DO `noop()` path.
+   */
+  async #primeInProcessIsolate(): Promise<void> {
+    if (!this.#inProcess) return;
+    const fnSource = '() => 0';
+    const fnHash = hashSource(fnSource);
+    const envelope = buildEnvelope({
+      cancel: undefined,
+      deadline: undefined,
+      deadlineMs: undefined,
+      mode: 'pool-fn',
+    });
+    try {
+      await this.#inProcess.runOne({
+        fnSource,
+        fnHash,
+        args: [],
+        cacheKeyStrategy: this.#opts.cacheKeyStrategy ?? 'stable',
+        // Borrow the user's workerOptions so the prewarmed isolate
+        // matches the shape of the real dispatches. Without this, the
+        // first real call would still cache-miss and pay cold-start.
+        workerOptions: workerOptionsToWire({
+          compatibilityDate: this.#opts.workerOptions?.compatibilityDate,
+          compatibilityFlags: this.#opts.workerOptions?.compatibilityFlags,
+          globalOutbound:
+            this.#opts.globalOutbound !== undefined
+              ? this.#opts.globalOutbound
+              : this.#opts.workerOptions?.globalOutbound,
+          limits: this.#opts.limits ?? this.#opts.workerOptions?.limits,
+          tailBindingName: this.#opts.observability?.tail?.bindingName,
+        }),
+        envelope,
+      });
+    } catch {
+      // Best-effort prewarm. Real dispatches surface genuine errors.
+    }
   }
 
   // ---- internal helpers ---------------------------------------------

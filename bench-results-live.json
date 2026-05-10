@@ -1,9 +1,9 @@
 {
   "target": "https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev",
-  "ts": "2026-05-10T20:05:09.287Z",
+  "ts": "2026-05-10T22:23:28.566Z",
   "methodology": {
     "warmupRuns": 2,
-    "samples": 3,
+    "samples": 5,
     "coldDefinition": "first measured run after warmup — captures any per-call dispatch cost not amortized by warmup",
     "warmDefinition": "median of remaining samples after the cold run — steady-state throughput",
     "sequentialDefinition": "per-task wall-clock from a single inline run (sequential-sample mode), multiplied by N",
@@ -31,17 +31,19 @@
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 2295,
+      "parallelColdMs": 1522,
       "parallelWarmRuns": [
-        1520,
-        1523
+        1579,
+        1563,
+        1609,
+        1631
       ],
-      "parallelWarmMs": 1522,
-      "parallelOverallMedianMs": 1523,
-      "sequentialExtrapolatedMs": 1704,
-      "speedup": 1.12,
-      "speedupColdParallel": 0.74,
-      "perTaskSampleMs": 426
+      "parallelWarmMs": 1594,
+      "parallelOverallMedianMs": 1579,
+      "sequentialExtrapolatedMs": 1684,
+      "speedup": 1.06,
+      "speedupColdParallel": 1.11,
+      "perTaskSampleMs": 421
     },
     {
       "workload": "mandelbrot",
@@ -55,17 +57,19 @@
         4,
         4
       ],
-      "parallelColdMs": 5339,
+      "parallelColdMs": 5194,
       "parallelWarmRuns": [
-        4848,
-        4626
+        4567,
+        5320,
+        4593,
+        5625
       ],
-      "parallelWarmMs": 4737,
-      "parallelOverallMedianMs": 4848,
-      "sequentialExtrapolatedMs": 6752,
-      "speedup": 1.43,
-      "speedupColdParallel": 1.26,
-      "perTaskSampleMs": 422
+      "parallelWarmMs": 4957,
+      "parallelOverallMedianMs": 5194,
+      "sequentialExtrapolatedMs": 6336,
+      "speedup": 1.28,
+      "speedupColdParallel": 1.22,
+      "perTaskSampleMs": 396
     },
     {
       "workload": "mandelbrot",
@@ -91,17 +95,19 @@
         4,
         4
       ],
-      "parallelColdMs": 5010,
+      "parallelColdMs": 4878,
       "parallelWarmRuns": [
-        4701,
-        4596
+        4942,
+        4145,
+        4447,
+        6843
       ],
-      "parallelWarmMs": 4649,
-      "parallelOverallMedianMs": 4701,
-      "sequentialExtrapolatedMs": 27200,
-      "speedup": 5.85,
-      "speedupColdParallel": 5.43,
-      "perTaskSampleMs": 425
+      "parallelWarmMs": 4695,
+      "parallelOverallMedianMs": 4878,
+      "sequentialExtrapolatedMs": 26880,
+      "speedup": 5.73,
+      "speedupColdParallel": 5.51,
+      "perTaskSampleMs": 420
     },
     {
       "workload": "mandelbrot",
@@ -143,17 +149,19 @@
         4,
         4
       ],
-      "parallelColdMs": 5582,
+      "parallelColdMs": 5146,
       "parallelWarmRuns": [
-        4832,
-        6466
+        5302,
+        6608,
+        6114,
+        4214
       ],
-      "parallelWarmMs": 5649,
-      "parallelOverallMedianMs": 5582,
-      "sequentialExtrapolatedMs": 54400,
-      "speedup": 9.63,
-      "speedupColdParallel": 9.75,
-      "perTaskSampleMs": 425
+      "parallelWarmMs": 5708,
+      "parallelOverallMedianMs": 5302,
+      "sequentialExtrapolatedMs": 50944,
+      "speedup": 8.93,
+      "speedupColdParallel": 9.9,
+      "perTaskSampleMs": 398
     },
     {
       "workload": "mandelbrot",
@@ -166,17 +174,19 @@
         1,
         4
       ],
-      "parallelColdMs": 4000,
+      "parallelColdMs": 4775,
       "parallelWarmRuns": [
-        5373,
-        4523
+        4490,
+        5836,
+        15809,
+        5346
       ],
-      "parallelWarmMs": 4948,
-      "parallelOverallMedianMs": 4523,
-      "sequentialExtrapolatedMs": 107776,
-      "speedup": 21.78,
-      "speedupColdParallel": 26.94,
-      "perTaskSampleMs": 421
+      "parallelWarmMs": 5591,
+      "parallelOverallMedianMs": 5346,
+      "sequentialExtrapolatedMs": 101632,
+      "speedup": 18.18,
+      "speedupColdParallel": 21.28,
+      "perTaskSampleMs": 397
     },
     {
       "workload": "mandelbrot",
@@ -190,17 +200,19 @@
         1,
         1
       ],
-      "parallelColdMs": 4676,
+      "parallelColdMs": 16063,
       "parallelWarmRuns": [
-        3204,
-        3039
+        16276,
+        3219,
+        5258,
+        22397
       ],
-      "parallelWarmMs": 3122,
-      "parallelOverallMedianMs": 3204,
-      "sequentialExtrapolatedMs": 215552,
-      "speedup": 69.04,
-      "speedupColdParallel": 46.1,
-      "perTaskSampleMs": 421
+      "parallelWarmMs": 10767,
+      "parallelOverallMedianMs": 16063,
+      "sequentialExtrapolatedMs": 203776,
+      "speedup": 18.93,
+      "speedupColdParallel": 12.69,
+      "perTaskSampleMs": 398
     },
     {
       "workload": "montecarlo",
@@ -210,17 +222,19 @@
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 19356,
+      "parallelColdMs": 19593,
       "parallelWarmRuns": [
-        19377,
-        19223
+        19399,
+        19145,
+        18934,
+        19115
       ],
-      "parallelWarmMs": 19300,
-      "parallelOverallMedianMs": 19356,
-      "sequentialExtrapolatedMs": 19032,
-      "speedup": 0.99,
+      "parallelWarmMs": 19130,
+      "parallelOverallMedianMs": 19145,
+      "sequentialExtrapolatedMs": 19108,
+      "speedup": 1,
       "speedupColdParallel": 0.98,
-      "perTaskSampleMs": 4758
+      "perTaskSampleMs": 4777
     },
     {
       "workload": "montecarlo",
@@ -234,17 +248,19 @@
         4,
         4
       ],
-      "parallelColdMs": 32564,
+      "parallelColdMs": 37117,
       "parallelWarmRuns": [
-        31917,
-        29557
+        29715,
+        31928,
+        35266,
+        35614
       ],
-      "parallelWarmMs": 30737,
-      "parallelOverallMedianMs": 31917,
-      "sequentialExtrapolatedMs": 76864,
-      "speedup": 2.5,
-      "speedupColdParallel": 2.36,
-      "perTaskSampleMs": 4804
+      "parallelWarmMs": 33597,
+      "parallelOverallMedianMs": 35266,
+      "sequentialExtrapolatedMs": 78000,
+      "speedup": 2.32,
+      "speedupColdParallel": 2.1,
+      "perTaskSampleMs": 4875
     },
     {
       "workload": "montecarlo",
@@ -270,17 +286,19 @@
         4,
         4
       ],
-      "parallelColdMs": 34904,
+      "parallelColdMs": 32397,
       "parallelWarmRuns": [
-        34783,
-        30488
+        37738,
+        37140,
+        44168,
+        38857
       ],
-      "parallelWarmMs": 32636,
-      "parallelOverallMedianMs": 34783,
-      "sequentialExtrapolatedMs": 307136,
-      "speedup": 9.41,
-      "speedupColdParallel": 8.8,
-      "perTaskSampleMs": 4799
+      "parallelWarmMs": 38298,
+      "parallelOverallMedianMs": 37738,
+      "sequentialExtrapolatedMs": 310656,
+      "speedup": 8.11,
+      "speedupColdParallel": 9.59,
+      "perTaskSampleMs": 4854
     },
     {
       "workload": "montecarlo",
@@ -322,17 +340,19 @@
         4,
         4
       ],
-      "parallelColdMs": 42761,
+      "parallelColdMs": 34982,
       "parallelWarmRuns": [
-        53492,
-        37546
+        35168,
+        34969,
+        37315,
+        37835
       ],
-      "parallelWarmMs": 45519,
-      "parallelOverallMedianMs": 42761,
-      "sequentialExtrapolatedMs": 618752,
-      "speedup": 13.59,
-      "speedupColdParallel": 14.47,
-      "perTaskSampleMs": 4834
+      "parallelWarmMs": 36242,
+      "parallelOverallMedianMs": 35168,
+      "sequentialExtrapolatedMs": 631424,
+      "speedup": 17.42,
+      "speedupColdParallel": 18.05,
+      "perTaskSampleMs": 4933
     },
     {
       "workload": "montecarlo",
@@ -345,41 +365,19 @@
         1,
         4
       ],
-      "parallelColdMs": 50258,
+      "parallelColdMs": 36645,
       "parallelWarmRuns": [
-        54918,
-        54204
+        37992,
+        43745,
+        54149,
+        38600
       ],
-      "parallelWarmMs": 54561,
-      "parallelOverallMedianMs": 54204,
-      "sequentialExtrapolatedMs": 1220864,
-      "speedup": 22.38,
-      "speedupColdParallel": 24.29,
-      "perTaskSampleMs": 4769
-    },
-    {
-      "workload": "montecarlo",
-      "size": 512,
-      "topology": "tree",
-      "treeDepth": 3,
-      "fanOutPerLevel": [
-        8,
-        8,
-        8,
-        1,
-        1
-      ],
-      "parallelColdMs": 23737,
-      "parallelWarmRuns": [
-        21824,
-        21395
-      ],
-      "parallelWarmMs": 21610,
-      "parallelOverallMedianMs": 21824,
-      "sequentialExtrapolatedMs": 2437632,
-      "speedup": 112.8,
-      "speedupColdParallel": 102.69,
-      "perTaskSampleMs": 4761
+      "parallelWarmMs": 41173,
+      "parallelOverallMedianMs": 38600,
+      "sequentialExtrapolatedMs": 1235456,
+      "speedup": 30.01,
+      "speedupColdParallel": 33.71,
+      "perTaskSampleMs": 4826
     },
     {
       "workload": "ga",
@@ -389,17 +387,19 @@
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 2480,
+      "parallelColdMs": 2644,
       "parallelWarmRuns": [
-        2482,
-        2371
+        2528,
+        2751,
+        2668,
+        2702
       ],
-      "parallelWarmMs": 2427,
-      "parallelOverallMedianMs": 2480,
-      "sequentialExtrapolatedMs": 4536,
-      "speedup": 1.87,
-      "speedupColdParallel": 1.83,
-      "perTaskSampleMs": 1134
+      "parallelWarmMs": 2685,
+      "parallelOverallMedianMs": 2668,
+      "sequentialExtrapolatedMs": 4956,
+      "speedup": 1.85,
+      "speedupColdParallel": 1.87,
+      "perTaskSampleMs": 1239
     },
     {
       "workload": "ga",
@@ -413,17 +413,19 @@
         4,
         4
       ],
-      "parallelColdMs": 6601,
+      "parallelColdMs": 6369,
       "parallelWarmRuns": [
-        9106,
-        6654
+        7775,
+        7396,
+        8369,
+        5886
       ],
-      "parallelWarmMs": 7880,
-      "parallelOverallMedianMs": 6654,
-      "sequentialExtrapolatedMs": 18192,
-      "speedup": 2.31,
-      "speedupColdParallel": 2.76,
-      "perTaskSampleMs": 1137
+      "parallelWarmMs": 7586,
+      "parallelOverallMedianMs": 7396,
+      "sequentialExtrapolatedMs": 20176,
+      "speedup": 2.66,
+      "speedupColdParallel": 3.17,
+      "perTaskSampleMs": 1261
     },
     {
       "workload": "ga",
@@ -449,17 +451,19 @@
         4,
         4
       ],
-      "parallelColdMs": 8145,
+      "parallelColdMs": 8417,
       "parallelWarmRuns": [
-        8028,
-        8384
+        7872,
+        9477,
+        9561,
+        7645
       ],
-      "parallelWarmMs": 8206,
-      "parallelOverallMedianMs": 8145,
-      "sequentialExtrapolatedMs": 79360,
-      "speedup": 9.67,
-      "speedupColdParallel": 9.74,
-      "perTaskSampleMs": 1240
+      "parallelWarmMs": 8675,
+      "parallelOverallMedianMs": 8417,
+      "sequentialExtrapolatedMs": 83392,
+      "speedup": 9.61,
+      "speedupColdParallel": 9.91,
+      "perTaskSampleMs": 1303
     },
     {
       "workload": "ga",
@@ -501,17 +505,19 @@
         4,
         4
       ],
-      "parallelColdMs": 9473,
+      "parallelColdMs": 9466,
       "parallelWarmRuns": [
-        9459,
-        13747
+        13155,
+        7305,
+        8202,
+        9257
       ],
-      "parallelWarmMs": 11603,
-      "parallelOverallMedianMs": 9473,
-      "sequentialExtrapolatedMs": 169344,
-      "speedup": 14.59,
-      "speedupColdParallel": 17.88,
-      "perTaskSampleMs": 1323
+      "parallelWarmMs": 8730,
+      "parallelOverallMedianMs": 9257,
+      "sequentialExtrapolatedMs": 161024,
+      "speedup": 18.44,
+      "speedupColdParallel": 17.01,
+      "perTaskSampleMs": 1258
     },
     {
       "workload": "ga",
@@ -524,17 +530,19 @@
         1,
         4
       ],
-      "parallelColdMs": 11097,
+      "parallelColdMs": 10107,
       "parallelWarmRuns": [
-        11275,
-        9046
+        10208,
+        10553,
+        10261,
+        9328
       ],
-      "parallelWarmMs": 10161,
-      "parallelOverallMedianMs": 11097,
-      "sequentialExtrapolatedMs": 334336,
-      "speedup": 32.9,
-      "speedupColdParallel": 30.13,
-      "perTaskSampleMs": 1306
+      "parallelWarmMs": 10235,
+      "parallelOverallMedianMs": 10208,
+      "sequentialExtrapolatedMs": 333568,
+      "speedup": 32.59,
+      "speedupColdParallel": 33,
+      "perTaskSampleMs": 1303
     },
     {
       "workload": "ga",
@@ -548,17 +556,19 @@
         1,
         1
       ],
-      "parallelColdMs": 5852,
+      "parallelColdMs": 7832,
       "parallelWarmRuns": [
-        6455,
-        5942
+        6089,
+        6860,
+        24691,
+        6908
       ],
-      "parallelWarmMs": 6199,
-      "parallelOverallMedianMs": 5942,
-      "sequentialExtrapolatedMs": 592896,
-      "speedup": 95.64,
-      "speedupColdParallel": 101.32,
-      "perTaskSampleMs": 1158
+      "parallelWarmMs": 6884,
+      "parallelOverallMedianMs": 6908,
+      "sequentialExtrapolatedMs": 649728,
+      "speedup": 94.38,
+      "speedupColdParallel": 82.96,
+      "perTaskSampleMs": 1269
     }
   ]
 }

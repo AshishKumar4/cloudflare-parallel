@@ -265,6 +265,20 @@ export interface WorkerSharedOptions<
   cacheKeyStrategy?: CacheKeyStrategy;
   observability?: ObservabilityOptions;
   workerOptions?: WorkerCodeOptions;
+  /**
+   * Region hint forwarded to `namespace.get(id, { locationHint })` when
+   * the underlying Durable Object is materialized. Best-effort; only
+   * honored on first access. Use to colocate freshly-created DOs with
+   * the request's incoming colo.
+   * Reference: https://developers.cloudflare.com/durable-objects/reference/data-location/
+   */
+  locationHint?: LocationHint;
+  /**
+   * Optional caller colo (e.g. `'SFO'`). Pass `request.cf?.colo as string`
+   * if you have a request handy. The library will pick a `locationHint`
+   * for you if `locationHint` is not set.
+   */
+  requestColo?: string;
 }
 
 export interface SchedulerOptions<

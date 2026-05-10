@@ -40,7 +40,7 @@ export type { CacheKeyStrategy } from './loader/cache-key';
 // Topology selector (escape hatch for deterministic tests).
 export { selectTopology } from './topology/selector';
 export type { Topology, SelectorOptions } from './topology/selector';
-export { balancedFill } from './topology/plan';
+export { balancedFill, fillCapped } from './topology/plan';
 export type {
   TopologyName,
   TopologyPlan,

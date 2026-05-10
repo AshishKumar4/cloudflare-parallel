@@ -15,7 +15,12 @@
 
 import { Parallel, bearerAuth, type WorkerLoader } from 'cloudflare-parallel';
 
-export { CfpCoordinator, CfpWorkerDO, CfpSubCoord } from 'cloudflare-parallel/durable-objects';
+export {
+  CfpCoordinator,
+  CfpWorkerDO,
+  CfpSubCoord,
+  CfpInProcessCoordinator,
+} from 'cloudflare-parallel/durable-objects';
 
 interface Env {
   LOADER: WorkerLoader;
@@ -26,14 +31,23 @@ interface Env {
   VM_TOKEN: string;
 }
 
+interface CtxWithExports extends ExecutionContext {
+  exports?: { CfpInProcessCoordinator?: unknown };
+}
+
 export default {
-  fetch(req: Request, env: Env): Promise<Response> {
+  fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Pool options live at the top level (the deprecated nested `pool:`
+    // shape was removed; see CHANGELOG for v0.3). `inProcess` skips the
+    // DO hop for size-≤4 submits — single-shot VM calls land there.
     return Parallel.vm<Record<string, never>>(env, {
-      pool: {
-        timeout: 5_000,
-        retries: 1,
-        globalOutbound: null,
-      },
+      timeout: 5_000,
+      retries: 1,
+      globalOutbound: null,
+      inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
+        | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
+        | undefined,
+      requestColo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
       policy: {
         kind: 'auth',
         auth: bearerAuth(env.VM_TOKEN),

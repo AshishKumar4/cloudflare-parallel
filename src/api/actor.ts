@@ -1,7 +1,11 @@
 import { BindingError, MissingBindingError } from '../errors/index';
 import { hashSource, serializeFunction } from '../loader/serialize';
 import type { UserFn } from './user-fn';
-import { workerOptionsToWire } from '../coordinator/internal';
+import {
+  locationHintForColo,
+  workerOptionsToWire,
+  type LocationHint,
+} from '../coordinator/internal';
 import { buildEnvelope } from '../transport/deadline-prop';
 import { dispatchWithResilience } from '../transport/rpc-client';
 import type { ActorOptions, PoolEnv, SubmitOptions } from './options';
@@ -26,6 +30,12 @@ interface ActorCoordinatorStub {
     envelope: DispatchEnvelope;
   }): Promise<RunOneResult>;
   actorClose(): Promise<void>;
+}
+
+// Local minimal shape — same as in `pool.ts`. `@cloudflare/workers-types`
+// declares this in newer versions but we don't want to hard-pin to one.
+interface DurableObjectNamespaceGetDurableObjectOptions {
+  locationHint?: LocationHint;
 }
 
 /**
@@ -64,6 +74,7 @@ export class ActorHandle<
 > implements IActorHandle<State, B, _C> {
   readonly #env: PoolEnv;
   readonly #opts: ActorOptions<State, B, _C>;
+  readonly #locationHint: LocationHint | undefined;
   #initialized = false;
 
   constructor(env: PoolEnv, opts: ActorOptions<State, B, _C>) {
@@ -81,12 +92,31 @@ export class ActorHandle<
     }
     this.#env = env;
     this.#opts = opts;
+    // Same auto-derivation as the Pool: `locationHint` is explicit if
+    // set, otherwise derived from `requestColo`. Actors are sticky
+    // long-lived DOs — the hint is honored only on first access, so
+    // the placement decision lands at actor construction time.
+    this.#locationHint = opts.locationHint ?? locationHintForColo(opts.requestColo);
   }
 
   #stub(): ActorCoordinatorStub {
     const ns = this.#env.CfpCoordinator!;
-    // Per-actor DO instance keyed on `actor:${id}`.
-    return ns.get(ns.idFromName(`actor:${this.#opts.id}`)) as unknown as ActorCoordinatorStub;
+    // Per-actor DO instance keyed on `actor:${id}`. `locationHint` is
+    // best-effort and only honored on first access; subsequent
+    // `idFromName` lookups are sticky to wherever the DO landed.
+    const id = ns.idFromName(`actor:${this.#opts.id}`);
+    const stub = this.#locationHint
+      ? (ns as DurableObjectNamespace & {
+          get(
+            id: DurableObjectId,
+            opts?: DurableObjectNamespaceGetDurableObjectOptions,
+          ): DurableObjectStub;
+        }).get(
+          id,
+          { locationHint: this.#locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions,
+        )
+      : ns.get(id);
+    return stub as unknown as ActorCoordinatorStub;
   }
 
   /**

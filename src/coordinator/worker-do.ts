@@ -1,4 +1,4 @@
-import { DurableObject, RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
+import { DurableObject, RpcTarget } from 'cloudflare:workers';
 import type { WorkerLoader } from '../types';
 import { LoaderRunner } from '../loader/runner';
 import { errorToFailedResult, type RunBatchRequest, type RunBatchResult } from './protocol';
@@ -143,9 +143,4 @@ async function runBatchOnEnv(
   return { results };
 }
 
-/**
- * Tiny WorkerEntrypoint shim so the DO is also addressable as a service
- * binding (some runtime configurations prefer service bindings over DO
- * namespaces for inter-Worker dispatch). Optional; default API uses DO.
- */
-export class CfpWorkerDOEntry extends WorkerEntrypoint<WorkerDOEnv> {}
+

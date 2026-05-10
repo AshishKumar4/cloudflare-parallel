@@ -6,6 +6,50 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (audit-findings sweep)
+
+- **`CfpInProcessCoordinator` loader-cap** (P0): the two `LoaderRunner`
+  constructions in `src/coordinator/in-process.ts` used
+  `callSite: 'fetch-handler'` (cap = 3) instead of `'do-method'`
+  (cap = 4). Surfaced as a "N=4 fan-out is barely faster than
+  sequential" complaint in the live demo. Now uses `'do-method'`; new
+  regression at `tests/unit/in-process-cap.test.ts` pins both call
+  sites.
+- **Auto-prewarm of the loaded isolate** (P0): when `inProcess` was
+  wired, `Pool#ensurePrewarm` short-circuited entirely, leaving the
+  loopback's loaded isolate to pay full cold-start on the first
+  dispatch in any quiescent window. Surfaced as the "the numbers
+  change every time I refresh" run-to-run inconsistency. Now fires a
+  single no-op `runOne` through the loopback (parallel with the real
+  dispatch) so the loaded isolate is hot when the workload arrives.
+  Cold→warm spread dropped from ~2.1× to ~1.01× empirically. New
+  regression at `tests/unit/prewarm.test.ts` (5 new tests in the
+  "inProcess loopback" describe block).
+- **Examples wire `inProcess`** (P1): `examples/build-pipeline`,
+  `examples/genetic-algorithm`, `examples/raytracer`,
+  `examples/vm` now pass
+  `inProcess: ctx.exports.CfpInProcessCoordinator` + `requestColo:
+  req.cf?.colo` to `Parallel.pool` (mirror of `examples/embeddings-batch`).
+  Previously these examples re-exported the entrypoint but never
+  wired it.
+- **Actor + Scheduler honor `locationHint` / `requestColo`** (P1):
+  `Parallel.actor` and `Parallel.scheduler` now accept the same
+  placement options as `Parallel.pool` and pass `locationHint` to
+  `namespace.get`. Picks colo placement at construction time;
+  honored on first DO access (sticky after). New regression at
+  `tests/unit/actor-scheduler-locationhint.test.ts`.
+- **Bench methodology samples=5** (P2): the committed
+  `bench-results-live.json` is now regenerated at the documented
+  contract (`samples=5`, `warmupRuns=2`).
+- **`examples/vm` migrated off deprecated nested `pool: {}` shape**:
+  pool options now live at the top level of the `Parallel.vm` opts,
+  matching the v0.3 API.
+- **`fillCapped` exported from the public API**: symmetric with
+  `balancedFill`. Both helpers were referenced in the CHANGELOG and
+  the tests but only `balancedFill` was on the public surface.
+- **`CfpWorkerDOEntry` removed**: empty placeholder class that nothing
+  referenced — implement-or-delete decision per the audit; deleted.
+
 ### Added
 
 - **`CfpInProcessCoordinator`** — a `WorkerEntrypoint` loopback target

@@ -31,7 +31,6 @@
 export {
   CfpCoordinator,
   CfpWorkerDO,
-  CfpWorkerDOEntry,
   CfpSubCoord,
   CfpInProcessCoordinator,
 } from './coordinator/index';
