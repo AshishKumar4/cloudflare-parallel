@@ -1294,6 +1294,25 @@ Replicate the loader-from-fetch test/B/C/D matrix; CI gate:
 
 **Reasoning.** F=8 gives K=2 up to 256, K=3 up to 2048, K=4 up to 16k. Latency vs LRU-thrash tradeoff. `ceil(log_8(N))` is human-legible.
 
+### 13.14 ADR-13: Auto-prewarm of the Coordinator DO (default-on)
+
+**Decision.** `Pool` defaults to `autoWarm: true` — the first `submit()` / `map()` / `scatter()` / etc. fires `Coordinator.noop()` in parallel with the real dispatch. Subsequent calls in the same Pool lifetime skip prewarm. `Pool.warm()` exposes the prewarm explicitly for callers that want to pay cold-start at construction.
+
+**Reasoning.** Empirical validation (live-edge measurements against a deployed Worker) shows a 14×–140× per-call cold-vs-warm latency ratio: a freshly-created DO costs ~300–400 ms on first call; subsequent calls on the warm channel are ~3–30 ms. The cold cost is unavoidable, but it can be moved off the critical path. The auto-warm dispatch is fire-and-forget (deduped via a one-shot promise), so cost is zero (parallelized with the real dispatch). Subsequent calls within the same Pool reuse the warm channel without re-prewarming. The opt-out exists for benchmarks that want to measure cold-start specifically.
+
+### 13.15 ADR-14: Selective `allowUnconfirmed` on actor checkpoint writes
+
+**Decision.** The actor's per-submit `storage.put(state, …)` and one-time `storage.put(initial-state, …)` calls pass `{ allowUnconfirmed: true }`. Scheduler `INSERT INTO jobs` and `UPDATE … SET status='done'` do **not** (the scheduler uses SQL writes, which don't have the option, and durability is the contract anyway).
+
+**Reasoning.** Empirical validation: 46–80 % wall-time reduction on writes at small N (32–36 ms saved). The trade-off is at-most-once durability — a write may be lost if the DO crashes before the commit lands. This is acceptable for the actor's per-submit checkpoint because:
+1. The Actor contract documents per-submit checkpointing as best-effort;
+2. The next submit reads the most-recent committed state, so a lost write surfaces as the prior state — exactly what a synchronous-commit crash would surface in the same order;
+3. The `state` is a single-shard in-memory snapshot; there's no cross-shard consistency to violate.
+
+It is **not** acceptable for the scheduler's durable queue (losing jobs is bad) or for ack writes (re-running a completed job is wrong) — but those use SQL, not key-value `put`, and the option doesn't apply.
+
+The audit table lives at `tests/unit/storage-flags.test.ts` and is mechanically pinned: a future `storage.put` added to scheduler-DO without the explanatory comment fails the test.
+
 ---
 
 ## §14 — Decision log + version metadata

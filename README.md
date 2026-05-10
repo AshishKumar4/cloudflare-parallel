@@ -379,22 +379,62 @@ Read [`DESIGN.md`](DESIGN.md) §4 for the math, ADRs, and the empirical caps tha
 
 ## Performance
 
-Three knobs cooperate to keep dispatch cheap end-to-end:
+Five mechanisms cooperate to keep dispatch cheap end-to-end. The first is **the** load-bearing pattern; the remaining four trim the residual overhead.
 
-**1. In-process coordinator for small fan-outs.** Pass `inProcess: ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` and any fan-out of size ≤ 4. The loopback stays inside the same Worker process — no inter-DO RPC, no cross-region routing — so per-call dispatch drops from tens of milliseconds to ~1–3 ms. Larger fan-outs still flow through the Coordinator DO (which composes 4N parallelism across leaf DOs). [`ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/).
+### 1. The held-`RpcTarget` fast path (the canonical pattern)
 
-**2. Promise pipelining at the leaf tier.** Fan-out to leaf DOs uses `stub.openSession().runBatch(...)` — the `runBatch` call is invoked on a not-yet-resolved session promise, and the runtime's RPC pipeline (Cap'n Proto promise pipelining) collapses both calls into a single round-trip per leaf. [Workers RPC reference](https://developers.cloudflare.com/workers/runtime-apis/rpc/).
+This is the strongest workaround in any Workers RPC fan-out. A library-internal benchmark measured a **99.83 % reduction in dispatch wall-time at N=8** (5 ms pipelined vs 2913 ms sequential) — the dispatch is constant-time regardless of N once the session is open. [Workers RPC promise-pipelining reference](https://developers.cloudflare.com/workers/runtime-apis/rpc/).
 
-**3. `locationHint` colocation.** Pass `requestColo: req.cf?.colo` (or `locationHint: 'wnam'` directly) so freshly-created leaf DOs land in the same region as the request's incoming colo. Best-effort placement, honored only on first access of each DO. [Data location reference](https://developers.cloudflare.com/durable-objects/reference/data-location/).
+The library applies this internally for every fan-out:
+
+```ts
+// Inside the Coordinator DO, when fanning out to leaf DOs:
+const session = stub.openSession();              // unawaited — promise pipelining
+const result  = await session.runBatch(envelope); // chained on the unresolved session
+```
+
+The runtime collapses `openSession()` + `runBatch()` into a single Cap'n Proto session per leaf. Without this pattern, each method call would pay full DO routing + `getActor` lookup + RPC round-trip. With it, the second call rides the open session for free.
+
+Mirror the pattern in your own RPC-heavy code: keep one held `RpcTarget` per remote DO, chain method calls without awaiting between them, and let the runtime pipeline the round-trips.
+
+### 2. In-process coordinator for small fan-outs
+
+Pass `inProcess: ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` and any fan-out of size ≤ 4. The loopback stays inside the same Worker process — no inter-DO RPC, no cross-region routing — so per-call dispatch drops from tens of milliseconds to ~1–3 ms. Larger fan-outs still flow through the Coordinator DO (which composes 4N parallelism across leaf DOs). [`ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/).
+
+### 3. Auto-warm of the Coordinator DO
+
+A freshly-created Durable Object pays a one-time creation cost (empirically ~300–400 ms in production); subsequent calls on the warm channel are ~3–30 ms — a 14×–140× per-call cold-vs-warm ratio. The library fires `noop()` to the Coordinator DO in parallel with the first real dispatch (under the `autoWarm: true` default) so the cold-start cost is absorbed off the critical path.
+
+```ts
+// Default: prewarm runs concurrently with the first submit.
+const pool = Parallel.pool(env, { /* autoWarm: true is the default */ });
+
+// Explicit: pay the cold-start cost up front (e.g. at Worker startup).
+await pool.warm();
+
+// Opt out: only useful when you're benchmarking cold-start specifically.
+const pool = Parallel.pool(env, { autoWarm: false });
+```
+
+### 4. `locationHint` colocation
+
+Pass `requestColo: req.cf?.colo` (or `locationHint: 'wnam'` directly) so freshly-created leaf DOs land in the same region as the request's incoming colo. Best-effort placement, honored only on first access of each DO. [Data location reference](https://developers.cloudflare.com/durable-objects/reference/data-location/).
+
+### 5. Selective `allowUnconfirmed` on actor writes
+
+The actor's per-submit state checkpoint uses `ctx.storage.put(state, { allowUnconfirmed: true })` — the response races back to the caller without waiting for the storage commit, saving 46–80 % of the per-write wall-time at small N. Safe here because the Actor contract documents per-submit checkpointing as best-effort and the next submit reads the (now-committed) state from storage. The flag is **not** applied to scheduler durable-queue writes (job persistence, job-ack), which use SQL with synchronous-commit semantics. [Transactional storage API reference](https://developers.cloudflare.com/durable-objects/api/transactional-storage-api/#put).
+
+### Putting it together
 
 ```ts
 const pool = Parallel.pool(env, {
   inProcess: ctx.exports.CfpInProcessCoordinator,    // small-N skips DO hop
   requestColo: req.cf?.colo as string | undefined,   // colocate leaf DOs
+  // autoWarm: true is the default — prewarm in parallel with first dispatch
 });
 ```
 
-The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed test worker with separate cold-run / warm-run reporting and equal warmup for both paths. Each hero workload (Mandelbrot tiles, Monte Carlo π, Bitcoin-style PoW, genetic algorithm) targets ~500–800 ms of CPU per task so the per-call dispatch floor is well-amortized.
+The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed test worker with separate cold-run / warm-run reporting and equal warmup for both paths.
 
 ### Cache key strategy
 

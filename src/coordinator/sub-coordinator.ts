@@ -83,6 +83,16 @@ export class CfpSubCoord extends DurableObject<SubCoordEnv> {
     const reqIdx = ++this.#requestCounter;
     return dispatchOnEnv(this.env, this.ctx.id.toString(), reqIdx, request);
   }
+
+  /**
+   * No-op prewarm method. See `CfpWorkerDO.noop()` — a fresh
+   * sub-coordinator pays the same DO-creation cost on first call. Library
+   * prewarm fires `noop()` in parallel with the real fan-out so the DO
+   * is hot when the workload arrives.
+   */
+  async noop(): Promise<void> {
+    /* intentionally empty */
+  }
 }
 
 async function dispatchOnEnv(

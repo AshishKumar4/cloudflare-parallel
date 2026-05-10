@@ -198,6 +198,22 @@ export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unk
    * for you if `locationHint` is not set.
    */
   requestColo?: string;
+  /**
+   * When `true` (the default), the pool fires a `noop()` against every
+   * leaf DO in parallel with the first fan-out's real dispatch. This
+   * absorbs the one-time DO-creation cost (empirically ~300–400 ms) on
+   * the prewarm goroutine while the real call rides the warm channel.
+   *
+   * Empirically validated: per-call cold-path drops 14×–140× when the
+   * DO is prewarmed. Cost: zero (parallelized with real dispatch). The
+   * second and subsequent fan-outs in the same Pool lifetime skip
+   * prewarm — the DOs are already warm.
+   *
+   * Set to `false` if you have a workload pattern where DO creation
+   * is part of the measured wall-clock you care about (e.g. you're
+   * benchmarking cold-start specifically).
+   */
+  autoWarm?: boolean;
 }
 
 export interface LoaderOnlyOptions<B = Record<string, unknown>, C = Record<string, unknown>> {

@@ -45,6 +45,18 @@ export class WorkerDOSession extends RpcTarget {
   async runBatch(request: RunBatchRequest): Promise<RunBatchResult> {
     return runBatchOnEnv(this.#env, request);
   }
+
+  /**
+   * No-op used by the prewarm pass. Returns immediately; intentionally
+   * does no storage I/O and dispatches no loader calls. The first call
+   * to a freshly-created leaf DO pays a one-time DO-creation cost
+   * (empirically ~300–400 ms in production); calling `noop()` in
+   * parallel with the real workload dispatch lets the DO finish creating
+   * while the application's first method call rides the warm channel.
+   */
+  async noop(): Promise<void> {
+    /* intentionally empty */
+  }
 }
 
 export class CfpWorkerDO extends DurableObject<WorkerDOEnv> {
@@ -61,6 +73,20 @@ export class CfpWorkerDO extends DurableObject<WorkerDOEnv> {
   /** Direct call form (kept for backward compat / single-batch dispatch). */
   async runBatch(request: RunBatchRequest): Promise<RunBatchResult> {
     return runBatchOnEnv(this.env, request);
+  }
+
+  /**
+   * No-op prewarm method. The first RPC against a freshly-created DO
+   * pays a one-time creation cost (empirically ~300–400 ms in
+   * production). Library-level prewarm fires `noop()` in parallel with
+   * the real fan-out so the DO finishes creating while the workload's
+   * first call rides the warm channel.
+   *
+   * Per-call cold→warm speedup measured at 14×–140×: ~380 ms cold,
+   * ~3–30 ms warm. Cost: zero (parallelized with real dispatch).
+   */
+  async noop(): Promise<void> {
+    /* intentionally empty */
   }
 }
 

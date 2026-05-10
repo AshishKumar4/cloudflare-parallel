@@ -1,6 +1,6 @@
 {
   "target": "https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev",
-  "ts": "2026-05-10T07:26:57.700Z",
+  "ts": "2026-05-10T18:02:15.919Z",
   "methodology": {
     "warmupRuns": 1,
     "samples": 3,
@@ -33,15 +33,15 @@
       ],
       "parallelColdMs": 11,
       "parallelWarmRuns": [
-        8034,
-        7942
+        8033,
+        7978
       ],
-      "parallelWarmMs": 7988,
-      "parallelOverallMedianMs": 7942,
-      "sequentialExtrapolatedMs": 38996,
-      "speedup": 4.88,
-      "speedupColdParallel": 3545.09,
-      "perTaskSampleMs": 9749
+      "parallelWarmMs": 8006,
+      "parallelOverallMedianMs": 7978,
+      "sequentialExtrapolatedMs": 14400,
+      "speedup": 1.8,
+      "speedupColdParallel": 1309.09,
+      "perTaskSampleMs": 3600
     },
     {
       "workload": "mandelbrot",
@@ -55,17 +55,17 @@
         4,
         4
       ],
-      "parallelColdMs": 12964,
+      "parallelColdMs": 9936,
       "parallelWarmRuns": [
-        17820,
-        14960
+        10173,
+        10267
       ],
-      "parallelWarmMs": 16390,
-      "parallelOverallMedianMs": 14960,
-      "sequentialExtrapolatedMs": 29008,
-      "speedup": 1.77,
-      "speedupColdParallel": 2.24,
-      "perTaskSampleMs": 1813
+      "parallelWarmMs": 10220,
+      "parallelOverallMedianMs": 10173,
+      "sequentialExtrapolatedMs": 29936,
+      "speedup": 2.93,
+      "speedupColdParallel": 3.01,
+      "perTaskSampleMs": 1871
     },
     {
       "workload": "mandelbrot",
@@ -91,17 +91,17 @@
         4,
         4
       ],
-      "parallelColdMs": 5250,
+      "parallelColdMs": 7201,
       "parallelWarmRuns": [
-        4708,
-        5107
+        5692,
+        5967
       ],
-      "parallelWarmMs": 4908,
-      "parallelOverallMedianMs": 5107,
-      "sequentialExtrapolatedMs": 30336,
-      "speedup": 6.18,
-      "speedupColdParallel": 5.78,
-      "perTaskSampleMs": 474
+      "parallelWarmMs": 5830,
+      "parallelOverallMedianMs": 5967,
+      "sequentialExtrapolatedMs": 30464,
+      "speedup": 5.23,
+      "speedupColdParallel": 4.23,
+      "perTaskSampleMs": 476
     },
     {
       "workload": "mandelbrot",
@@ -143,64 +143,17 @@
         4,
         4
       ],
-      "parallelColdMs": 4122,
+      "parallelColdMs": 15794,
       "parallelWarmRuns": [
-        2969,
-        3832
+        2981,
+        3494
       ],
-      "parallelWarmMs": 3401,
-      "parallelOverallMedianMs": 3832,
-      "sequentialExtrapolatedMs": 34048,
-      "speedup": 10.01,
-      "speedupColdParallel": 8.26,
-      "perTaskSampleMs": 266
-    },
-    {
-      "workload": "mandelbrot",
-      "size": 256,
-      "topology": "tree",
-      "treeDepth": 2,
-      "fanOutPerLevel": [
-        8,
-        8,
-        1,
-        4
-      ],
-      "parallelColdMs": 2953,
-      "parallelWarmRuns": [
-        2430,
-        5762
-      ],
-      "parallelWarmMs": 4096,
-      "parallelOverallMedianMs": 2953,
-      "sequentialExtrapolatedMs": 34048,
-      "speedup": 8.31,
-      "speedupColdParallel": 11.53,
-      "perTaskSampleMs": 133
-    },
-    {
-      "workload": "mandelbrot",
-      "size": 512,
-      "topology": "tree",
-      "treeDepth": 3,
-      "fanOutPerLevel": [
-        8,
-        8,
-        8,
-        1,
-        1
-      ],
-      "parallelColdMs": 2322,
-      "parallelWarmRuns": [
-        2098,
-        2038
-      ],
-      "parallelWarmMs": 2068,
-      "parallelOverallMedianMs": 2098,
-      "sequentialExtrapolatedMs": 37888,
-      "speedup": 18.32,
-      "speedupColdParallel": 16.32,
-      "perTaskSampleMs": 74
+      "parallelWarmMs": 3238,
+      "parallelOverallMedianMs": 3494,
+      "sequentialExtrapolatedMs": 33920,
+      "speedup": 10.48,
+      "speedupColdParallel": 2.15,
+      "perTaskSampleMs": 265
     },
     {
       "workload": "montecarlo",
@@ -210,17 +163,17 @@
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 19146,
+      "parallelColdMs": 19416,
       "parallelWarmRuns": [
-        19262,
-        19150
+        19243,
+        19434
       ],
-      "parallelWarmMs": 19206,
-      "parallelOverallMedianMs": 19150,
-      "sequentialExtrapolatedMs": 19524,
-      "speedup": 1.02,
-      "speedupColdParallel": 1.02,
-      "perTaskSampleMs": 4881
+      "parallelWarmMs": 19339,
+      "parallelOverallMedianMs": 19416,
+      "sequentialExtrapolatedMs": 20020,
+      "speedup": 1.04,
+      "speedupColdParallel": 1.03,
+      "perTaskSampleMs": 5005
     },
     {
       "workload": "montecarlo",
@@ -234,17 +187,17 @@
         4,
         4
       ],
-      "parallelColdMs": 28142,
+      "parallelColdMs": 30196,
       "parallelWarmRuns": [
-        31379,
-        31485
+        34607,
+        29050
       ],
-      "parallelWarmMs": 31432,
-      "parallelOverallMedianMs": 31379,
-      "sequentialExtrapolatedMs": 76416,
-      "speedup": 2.43,
-      "speedupColdParallel": 2.72,
-      "perTaskSampleMs": 4776
+      "parallelWarmMs": 31829,
+      "parallelOverallMedianMs": 30196,
+      "sequentialExtrapolatedMs": 78592,
+      "speedup": 2.47,
+      "speedupColdParallel": 2.6,
+      "perTaskSampleMs": 4912
     },
     {
       "workload": "montecarlo",
@@ -270,17 +223,17 @@
         4,
         4
       ],
-      "parallelColdMs": 35584,
+      "parallelColdMs": 31237,
       "parallelWarmRuns": [
-        33939,
-        35060
+        40292,
+        54659
       ],
-      "parallelWarmMs": 34500,
-      "parallelOverallMedianMs": 35060,
-      "sequentialExtrapolatedMs": 313920,
-      "speedup": 9.1,
-      "speedupColdParallel": 8.82,
-      "perTaskSampleMs": 4905
+      "parallelWarmMs": 47476,
+      "parallelOverallMedianMs": 40292,
+      "sequentialExtrapolatedMs": 310400,
+      "speedup": 6.54,
+      "speedupColdParallel": 9.94,
+      "perTaskSampleMs": 4850
     },
     {
       "workload": "montecarlo",
@@ -322,17 +275,17 @@
         4,
         4
       ],
-      "parallelColdMs": 37215,
+      "parallelColdMs": 32707,
       "parallelWarmRuns": [
-        38580,
-        49040
+        53456,
+        37258
       ],
-      "parallelWarmMs": 43810,
-      "parallelOverallMedianMs": 38580,
-      "sequentialExtrapolatedMs": 626944,
-      "speedup": 14.31,
-      "speedupColdParallel": 16.85,
-      "perTaskSampleMs": 4898
+      "parallelWarmMs": 45357,
+      "parallelOverallMedianMs": 37258,
+      "sequentialExtrapolatedMs": 628224,
+      "speedup": 13.85,
+      "speedupColdParallel": 19.21,
+      "perTaskSampleMs": 4908
     },
     {
       "workload": "montecarlo",
@@ -345,17 +298,17 @@
         1,
         4
       ],
-      "parallelColdMs": 59311,
+      "parallelColdMs": 38363,
       "parallelWarmRuns": [
-        52393,
-        38960
+        54760,
+        38681
       ],
-      "parallelWarmMs": 45677,
-      "parallelOverallMedianMs": 52393,
-      "sequentialExtrapolatedMs": 1246208,
-      "speedup": 27.28,
-      "speedupColdParallel": 21.01,
-      "perTaskSampleMs": 4868
+      "parallelWarmMs": 46721,
+      "parallelOverallMedianMs": 38681,
+      "sequentialExtrapolatedMs": 1247232,
+      "speedup": 26.7,
+      "speedupColdParallel": 32.51,
+      "perTaskSampleMs": 4872
     },
     {
       "workload": "ga",
@@ -365,17 +318,17 @@
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 2469,
+      "parallelColdMs": 2634,
       "parallelWarmRuns": [
-        2754,
-        2528
+        2689,
+        2616
       ],
-      "parallelWarmMs": 2641,
-      "parallelOverallMedianMs": 2528,
-      "sequentialExtrapolatedMs": 4900,
-      "speedup": 1.86,
-      "speedupColdParallel": 1.98,
-      "perTaskSampleMs": 1225
+      "parallelWarmMs": 2653,
+      "parallelOverallMedianMs": 2634,
+      "sequentialExtrapolatedMs": 5064,
+      "speedup": 1.91,
+      "speedupColdParallel": 1.92,
+      "perTaskSampleMs": 1266
     },
     {
       "workload": "ga",
@@ -389,17 +342,17 @@
         4,
         4
       ],
-      "parallelColdMs": 6133,
+      "parallelColdMs": 5696,
       "parallelWarmRuns": [
-        6092,
-        7441
+        6833,
+        6343
       ],
-      "parallelWarmMs": 6767,
-      "parallelOverallMedianMs": 6133,
-      "sequentialExtrapolatedMs": 20832,
-      "speedup": 3.08,
-      "speedupColdParallel": 3.4,
-      "perTaskSampleMs": 1302
+      "parallelWarmMs": 6588,
+      "parallelOverallMedianMs": 6343,
+      "sequentialExtrapolatedMs": 11472,
+      "speedup": 1.74,
+      "speedupColdParallel": 2.01,
+      "perTaskSampleMs": 717
     },
     {
       "workload": "ga",
@@ -425,17 +378,17 @@
         4,
         4
       ],
-      "parallelColdMs": 9104,
+      "parallelColdMs": 8578,
       "parallelWarmRuns": [
-        9039,
-        11540
+        9197,
+        7519
       ],
-      "parallelWarmMs": 10290,
-      "parallelOverallMedianMs": 9104,
-      "sequentialExtrapolatedMs": 78848,
-      "speedup": 7.66,
-      "speedupColdParallel": 8.66,
-      "perTaskSampleMs": 1232
+      "parallelWarmMs": 8358,
+      "parallelOverallMedianMs": 8578,
+      "sequentialExtrapolatedMs": 42688,
+      "speedup": 5.11,
+      "speedupColdParallel": 4.98,
+      "perTaskSampleMs": 667
     },
     {
       "workload": "ga",
@@ -477,17 +430,17 @@
         4,
         4
       ],
-      "parallelColdMs": 9171,
+      "parallelColdMs": 7985,
       "parallelWarmRuns": [
-        9124,
-        10629
+        7681,
+        8043
       ],
-      "parallelWarmMs": 9877,
-      "parallelOverallMedianMs": 9171,
-      "sequentialExtrapolatedMs": 151936,
-      "speedup": 15.38,
-      "speedupColdParallel": 16.57,
-      "perTaskSampleMs": 1187
+      "parallelWarmMs": 7862,
+      "parallelOverallMedianMs": 7985,
+      "sequentialExtrapolatedMs": 77952,
+      "speedup": 9.92,
+      "speedupColdParallel": 9.76,
+      "perTaskSampleMs": 609
     },
     {
       "workload": "ga",
@@ -500,41 +453,17 @@
         1,
         4
       ],
-      "parallelColdMs": 10430,
+      "parallelColdMs": 8928,
       "parallelWarmRuns": [
-        11196,
-        9019
+        9844,
+        9608
       ],
-      "parallelWarmMs": 10108,
-      "parallelOverallMedianMs": 10430,
-      "sequentialExtrapolatedMs": 312832,
-      "speedup": 30.95,
-      "speedupColdParallel": 29.99,
-      "perTaskSampleMs": 1222
-    },
-    {
-      "workload": "ga",
-      "size": 512,
-      "topology": "tree",
-      "treeDepth": 3,
-      "fanOutPerLevel": [
-        8,
-        8,
-        8,
-        1,
-        1
-      ],
-      "parallelColdMs": 5657,
-      "parallelWarmRuns": [
-        25761,
-        5501
-      ],
-      "parallelWarmMs": 15631,
-      "parallelOverallMedianMs": 5657,
-      "sequentialExtrapolatedMs": 686080,
-      "speedup": 43.89,
-      "speedupColdParallel": 121.28,
-      "perTaskSampleMs": 1340
+      "parallelWarmMs": 9726,
+      "parallelOverallMedianMs": 9608,
+      "sequentialExtrapolatedMs": 155136,
+      "speedup": 15.95,
+      "speedupColdParallel": 17.38,
+      "perTaskSampleMs": 606
     }
   ]
 }
