@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>cloudflare-parallel — live demo</title>
+    <meta
+      name="description"
+      content="Live, interactive showcase of cloudflare-parallel. CPU-bound parallel computing on Cloudflare Workers. 4N parallel V8 isolates per request."
+    />
+    <link rel="icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23f6821f'/%3E%3Ctext x='3' y='12' fill='white' font-family='monospace' font-size='10' font-weight='bold'%3EP%3C/text%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="hdr">
+      <div class="container">
+        <div class="brand">
+          <span class="brand-dot" aria-hidden="true"></span>
+          <span class="brand-name">cloudflare-parallel</span>
+          <span class="brand-tag">v0.3 · live demo</span>
+        </div>
+        <nav class="nav">
+          <a href="https://github.com/AshishKumar4/cloudflare-parallel" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+          <a href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/DESIGN.md" target="_blank" rel="noopener">Design</a>
+          <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">◐</button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="container hero">
+        <h1>4N parallel V8 isolates per Worker request.</h1>
+        <p class="lede">
+          Burn CPU across <em>real</em> parallel isolates on Cloudflare Workers.
+          Hash, transform, simulate, render, evolve — work that single-threaded
+          JavaScript can't fan out, this library can. Pick a size below and watch
+          the topology selector decide whether to run in-DO, hybrid, or tree.
+        </p>
+        <div class="callout">
+          <strong>This library is for CPU work.</strong> If you're awaiting
+          <code>fetch</code> / KV / AI / R2, plain <code>Promise.all</code> on one isolate
+          already gives you that for free.
+          <a href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/docs/when-to-use.md" target="_blank" rel="noopener">When to use →</a>
+        </div>
+      </section>
+
+      <!-- HERO PANEL -->
+      <section class="container panel" id="panel-hero">
+        <div class="panel-head">
+          <h2>① Hero · <code>pool.map</code> over a CPU-bound function</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/tests/prod/test-worker/src/index.ts#L300" target="_blank" rel="noopener">view source</a>
+        </div>
+        <p class="panel-desc">
+          Each item: a SHA-256 chain (5,000 iterations over a 64-byte buffer).
+          ~80–150&nbsp;ms of CPU per item on workerd. Pick a fan-out size; the
+          library picks the topology.
+        </p>
+        <div class="hero-controls">
+          <span>Fan out across</span>
+          <div class="size-tabs" role="tablist" aria-label="Fan-out size">
+            <button data-size="4" class="size-tab" role="tab">4</button>
+            <button data-size="32" class="size-tab" role="tab">32</button>
+            <button data-size="128" class="size-tab is-active" role="tab" aria-selected="true">128</button>
+            <button data-size="256" class="size-tab" role="tab">256</button>
+            <button data-size="512" class="size-tab" role="tab">512</button>
+          </div>
+          <button class="run-btn" id="hero-run">Run fan-out</button>
+        </div>
+        <div class="hero-grid">
+          <div class="metric">
+            <div class="metric-label">Topology</div>
+            <div class="metric-value" id="hero-topology">—</div>
+            <div class="metric-sub" id="hero-fanout">size?</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Wall-clock (parallel)</div>
+            <div class="metric-value"><span id="hero-par-ms">—</span><span class="unit">ms</span></div>
+            <div class="metric-sub" id="hero-par-detail">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Sequential baseline</div>
+            <div class="metric-value"><span id="hero-seq-ms">—</span><span class="unit">ms</span></div>
+            <div class="metric-sub">extrapolated from N=32 sample</div>
+          </div>
+          <div class="metric metric-speedup">
+            <div class="metric-label">Speedup</div>
+            <div class="metric-value"><span id="hero-speedup">—</span><span class="unit">×</span></div>
+            <div class="metric-sub" id="hero-isolates">—</div>
+          </div>
+        </div>
+        <pre class="code"><code id="hero-code">await pool.map(sha256Chain, items)</code></pre>
+        <div class="topology-svg" id="hero-svg" aria-hidden="true"></div>
+      </section>
+
+      <!-- TOPOLOGY VISUALIZER -->
+      <section class="container panel" id="panel-topology">
+        <div class="panel-head">
+          <h2>② Topology · how the selector picks</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/src/topology/selector.ts" target="_blank" rel="noopener">view source</a>
+        </div>
+        <p class="panel-desc">
+          The auto-selector reads <code>items.length</code> and picks one of three shapes.
+          Hover any row to see the math; click <em>Run</em> to fan out and update
+          the live numbers.
+        </p>
+        <table class="topo-table" id="topo-table">
+          <thead>
+            <tr>
+              <th>Size</th>
+              <th>Topology</th>
+              <th>Math</th>
+              <th>V8 isolates</th>
+              <th>Live</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-size="4"><td>4</td><td><span class="topo-badge topo-in-do">in-do</span></td><td>1 DO × 4 loaders</td><td>4</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="32"><td>32</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>⌈32/4⌉=8 leaves × 4</td><td>32</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="128"><td>128</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>⌈128/4⌉=32 leaves × 4</td><td>128 (4N)</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="256"><td>256</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=2 tiers, F=8</td><td>4·F²</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="512"><td>512</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=3 tiers, F=8</td><td>4·F³</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- PRIMITIVE PLAYGROUNDS -->
+      <section class="container panel" id="panel-primitives">
+        <div class="panel-head">
+          <h2>③ Every primitive, hands-on</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/src/api/pool.ts" target="_blank" rel="noopener">view source</a>
+        </div>
+        <p class="panel-desc">
+          Each card runs against the live test worker. The code shown is the
+          actual call being made.
+        </p>
+        <div class="prim-grid" id="prim-grid"><!-- populated by JS --></div>
+      </section>
+
+      <!-- SCHEDULER -->
+      <section class="container panel" id="panel-scheduler">
+        <div class="panel-head">
+          <h2>④ Scheduler · reactive job queue</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/src/scheduler/dispatcher.ts" target="_blank" rel="noopener">view source</a>
+        </div>
+        <p class="panel-desc">
+          Enqueue a CPU-bound burst (each job: 1M LCG iterations). Reactive
+          dispatch starts work the moment a slot frees — no alarm-batched
+          delay. Fair round-robin across <code>tenantId</code>.
+        </p>
+        <div class="sched-controls">
+          <label>Burst size <input type="number" id="sched-count" value="32" min="1" max="256" /></label>
+          <button class="run-btn" id="sched-run">Enqueue burst</button>
+        </div>
+        <div class="sched-grid">
+          <div class="metric"><div class="metric-label">Queued</div><div class="metric-value" id="sched-queued">—</div></div>
+          <div class="metric"><div class="metric-label">In-flight</div><div class="metric-value" id="sched-running">—</div></div>
+          <div class="metric"><div class="metric-label">Completed</div><div class="metric-value" id="sched-done">—</div></div>
+          <div class="metric"><div class="metric-label">Failed</div><div class="metric-value" id="sched-failed">—</div></div>
+          <div class="metric"><div class="metric-label">Cancelled</div><div class="metric-value" id="sched-cancelled">—</div></div>
+        </div>
+        <pre class="code"><code id="sched-code">await scheduler.enqueue({ fn, args, tenantId, idempotencyKey })</code></pre>
+      </section>
+
+      <!-- ACTOR -->
+      <section class="container panel" id="panel-actor">
+        <div class="panel-head">
+          <h2>⑤ Actor · pinned state across submits</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/src/api/actor.ts" target="_blank" rel="noopener">view source</a>
+        </div>
+        <p class="panel-desc">
+          A counter Actor whose state lives in a Coordinator DO's SQLite.
+          Each submit mutates the state in place; the runtime structured-clones
+          it after each call. Close the Actor; the state is gone.
+        </p>
+        <div class="actor-controls">
+          <label>Actor id <input type="text" id="actor-id" value="demo-counter" /></label>
+          <button class="run-btn" id="actor-inc">Increment</button>
+          <button class="run-btn" id="actor-state">Read state</button>
+          <button class="run-btn run-btn-danger" id="actor-close">Close</button>
+        </div>
+        <div class="actor-result">
+          <div class="metric"><div class="metric-label">Counter</div><div class="metric-value" id="actor-count">—</div></div>
+        </div>
+        <pre class="code"><code id="actor-code">await actor.submit((state) =&gt; ++state.count)</code></pre>
+      </section>
+
+      <!-- VM SUBMIT-CODE -->
+      <section class="container panel" id="panel-vm">
+        <div class="panel-head">
+          <h2>⑥ VM · sandboxed user code over HTTP</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/src/api/submit-code-handler.ts" target="_blank" rel="noopener">view source</a>
+        </div>
+        <p class="panel-desc">
+          Paste a function expression. It runs in a fresh sandboxed V8 isolate
+          with <code>globalOutbound: null</code> (no <code>fetch</code>) and zero bindings exposed.
+          Bearer-auth required. <strong>Don't try to bypass the sandbox</strong> — it's
+          load-bearing.
+        </p>
+        <div class="vm-controls">
+          <label class="vm-token">Bearer token
+            <input type="text" id="vm-token" value="dev-prod-test-token-min-16-chars-please" />
+          </label>
+          <textarea id="vm-fn" rows="6" spellcheck="false">(a, b) =&gt; {
+  let x = a + b;
+  for (let i = 0; i &lt; 100000; i++) x = (x * 16807) % 2147483647;
+  return x;
+}</textarea>
+          <label class="vm-args">Args (JSON array)
+            <input type="text" id="vm-args" value="[6, 7]" />
+          </label>
+          <button class="run-btn" id="vm-run">Submit</button>
+        </div>
+        <div class="vm-result">
+          <pre id="vm-out">click Submit to run</pre>
+        </div>
+      </section>
+
+      <!-- CANCEL SHOWCASE -->
+      <section class="container panel" id="panel-cancel">
+        <div class="panel-head">
+          <h2>⑦ Cancel · live AbortSignal</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/src/api/cancel.ts" target="_blank" rel="noopener">view source</a>
+        </div>
+        <p class="panel-desc">
+          Start a 1M-iteration SHA chain inside an isolate. Hit <em>Cancel</em>;
+          the request closes; <code>env.signal.aborted</code> trips inside the loaded
+          isolate; the loop returns early. Watch the iteration counter stop.
+        </p>
+        <div class="cancel-controls">
+          <label>Target iters <input type="number" id="cancel-iters" value="1000000" min="10000" max="5000000" step="10000" /></label>
+          <button class="run-btn" id="cancel-start">Start</button>
+          <button class="run-btn run-btn-danger" id="cancel-stop" disabled>Cancel</button>
+        </div>
+        <div class="cancel-progress">
+          <div class="progress-bar"><div class="progress-fill" id="cancel-fill" style="width:0"></div></div>
+          <div class="cancel-status" id="cancel-status">idle</div>
+        </div>
+        <pre class="code"><code>const cancel = new CancelToken();
+await pool.submit(longLoop, iters, { cancel });
+// hit /demo/cancel-start; close the SSE to fire cancel.</code></pre>
+      </section>
+
+      <!-- BENCH LEADERBOARD -->
+      <section class="container panel" id="panel-bench">
+        <div class="panel-head">
+          <h2>⑧ Bench · live edge measurements</h2>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/bench-results-live.json" target="_blank" rel="noopener">bench-results-live.json</a>
+        </div>
+        <p class="panel-desc">
+          The honest curve. Each row: SHA-256-chain over N items, parallel via
+          <code>pool.map</code> vs sequential baseline. Speedup grows with size as the
+          dispatch overhead amortizes; tree topology kicks in at 256.
+        </p>
+        <table class="bench-table" id="bench-table">
+          <thead>
+            <tr>
+              <th>Size</th>
+              <th>Topology</th>
+              <th>Sequential</th>
+              <th>Parallel</th>
+              <th>Speedup</th>
+              <th>Run live</th>
+            </tr>
+          </thead>
+          <tbody><!-- populated by JS --></tbody>
+        </table>
+      </section>
+
+      <footer class="container ftr">
+        <div class="ftr-row">
+          <span>Backend: <a href="https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev/health" target="_blank" rel="noopener"><code>cloudflare-parallel-prod-tests</code></a></span>
+          <span>Frontend: Cloudflare Pages · vanilla TS · ~30 KB</span>
+          <span><a href="https://github.com/AshishKumar4/cloudflare-parallel" target="_blank" rel="noopener">github.com/AshishKumar4/cloudflare-parallel</a></span>
+        </div>
+      </footer>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

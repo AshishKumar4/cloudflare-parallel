@@ -1,13 +1,9 @@
-name = "research-agent"
+name = "cfp-genetic-algorithm-example"
 main = "src/index.ts"
 compatibility_date = "2026-01-20"
-compatibility_flags = ["nodejs_compat"]
 
 [[worker_loaders]]
 binding = "LOADER"
-
-[ai]
-binding = "AI"
 
 [[durable_objects.bindings]]
 name = "CfpCoordinator"

@@ -32,14 +32,43 @@ bun run prepublishOnly
 ## Local end-to-end testing
 
 ```bash
-cd examples/research-agent
+cd examples/embeddings-batch       # or raytracer / genetic-algorithm / build-pipeline
+bun install
 bun x wrangler dev
 # In another shell:
-curl 'http://localhost:8787/?q=test'
+curl 'http://localhost:8787/?n=64'
 ```
 
-Live tests against deployed workers require `CLOUDFLARE_API_TOKEN` and
-are skipped in fork CI.
+## Live prod tests against the deployed test worker
+
+A test worker is already deployed at
+[`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev).
+Run the E2E + bench against it:
+
+```bash
+# Substrate validation (against cf-mp-vm.ashishkumarsingh.com — public reference worker):
+bun test tests/prod/cf-mp-vm.test.ts
+
+# Library E2E against the deployed test worker:
+CFP_E2E_TARGET=https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev \
+  bun run tests/prod/e2e-live.ts
+
+# Live edge bench (CPU-bound, every topology size):
+CFP_E2E_TARGET=https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev \
+  bun run tests/prod/bench-live.ts
+```
+
+Both runners write `bench-results.json` / `bench-results-live.json`.
+
+To redeploy after src/ changes:
+
+```bash
+cd tests/prod/test-worker
+CLOUDFLARE_ACCOUNT_ID=<your-account-id> npx wrangler deploy
+```
+
+If you're working on a fork or different account, deploy your own copy
+and set `CFP_E2E_TARGET` accordingly. Wrangler login is `npx wrangler login`.
 
 ## Pull requests
 

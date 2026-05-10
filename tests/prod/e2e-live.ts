@@ -2,29 +2,31 @@
 /**
  * Live library E2E runner.
  *
- * Boots `tests/prod/test-worker` via `wrangler dev --local` (workerd
- * runtime, no deploy required, no Cloudflare account credentials),
- * then exercises every primitive through HTTP:
+ * Two modes:
+ *   - Default: boots `tests/prod/test-worker` via `wrangler dev --local`.
+ *   - `CFP_E2E_TARGET=<url>`: hits the given URL directly (e.g. a deployed
+ *     Worker on workers.dev). Skips the local boot.
  *
- *   - Pool: submit, map (every topology size), scatter, reduce, pmap,
- *     pipe, mapStream, mapOrdered, cancel, stats
+ * Exercises every primitive through HTTP:
+ *   - Pool: submit, map (every topology size, ≤512), scatter, reduce, pmap,
+ *     pipe, mapStream, mapOrdered, cancel, stats, warm
  *   - Actor: inc / state / close
  *   - Scheduler: enqueue, result, stats, cancel-tenant, configure
  *   - VM: bearer auth + sandboxed submit
  *   - LoaderOnly: map
  *   - Errors: TimeoutError + AggregateExecutionError round-trips
- *
- * Captures per-call wall-clock so the bench harness can publish
- * topology timings.
  */
 
 import { spawn } from 'node:child_process';
 import { unlinkSync, writeFileSync } from 'node:fs';
 
+const REMOTE = process.env.CFP_E2E_TARGET ?? '';
 const PORT = 8787;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = REMOTE || `http://127.0.0.1:${PORT}`;
 const TOKEN = 'dev-prod-test-token-min-16-chars-please';
 const LOG_FILE = '/tmp/cfp-prod-test-worker.log';
+// Per-call timeout. Real edge can hit 10s+ on cold-start fan-outs at n=512.
+const REQ_TIMEOUT_MS = REMOTE ? 60_000 : 30_000;
 
 type Json = Record<string, unknown>;
 
@@ -48,7 +50,13 @@ function fail(name: string, ms: number, err: unknown): void {
 }
 
 async function call(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(`${BASE}${path}`, init);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
+  try {
+    return await fetch(`${BASE}${path}`, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 async function callJson<T = Json>(path: string, body?: unknown, headers?: HeadersInit): Promise<T> {
   const r = await call(path, {
@@ -92,11 +100,16 @@ async function timed<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
 // ----- Test plan ----------------------------------------------------------
 
 async function runTests(): Promise<void> {
-  // Pool
+  // Pool — every primitive
   await timed('pool/submit', () =>
     callJson('/pool/submit', { fn: '(a, b) => a + b', args: [2, 3] }),
   );
-  for (const size of [4, 8, 16, 32, 64, 128]) {
+  // Topology coverage at every regime: in-do (≤4), hybrid (5..256), tree (>256).
+  // n=512 forces the auto-selector into the tree topology.
+  const sizes = REMOTE
+    ? [4, 8, 16, 32, 64, 128, 256, 512]
+    : [4, 8, 16, 32, 64, 128];
+  for (const size of sizes) {
     const items = Array.from({ length: size }, (_, i) => i);
     await timed(`pool/map size=${size}`, () => callJson('/pool/map', { items }));
   }
@@ -108,15 +121,12 @@ async function runTests(): Promise<void> {
     callJson('/pool/pmap', { items: [1, 2, 3, 4, 5, 6, 7, 8], chunks: 4 }),
   );
   await timed('pool/pipe', () => callJson('/pool/pipe', { input: 1 }));
-  await timed('pool/mapStream', () =>
-    callJson('/pool/mapStream', { items: [1, 2, 3, 4] }),
-  );
-  await timed('pool/mapOrdered', () =>
-    callJson('/pool/mapOrdered', { items: [1, 2, 3, 4] }),
-  );
+  await timed('pool/mapStream', () => callJson('/pool/mapStream', { items: [1, 2, 3, 4] }));
+  await timed('pool/mapOrdered', () => callJson('/pool/mapOrdered', { items: [1, 2, 3, 4] }));
   await timed('pool/cancel (mid-flight)', () =>
     callJson('/pool/cancel', { items: [1, 2, 3, 4], cancelAfterMs: 50 }),
   );
+  await timed('pool/warm', () => callJson('/pool/warm', { isolates: 4 }));
   await timed('pool/stats', () => callJson('/pool/stats'));
 
   // Actor
@@ -134,7 +144,6 @@ async function runTests(): Promise<void> {
     await new Promise((r) => setTimeout(r, 500));
     await timed('scheduler/result', () => callJson(`/scheduler/result?id=${enq.jobId}`));
   }
-  // idempotency: same key twice
   await timed('scheduler/enqueue idem', () =>
     callJson('/scheduler/enqueue', { tenant: 't-1', n: 1000, idemKey: 'key-1' }),
   );
@@ -165,9 +174,7 @@ async function runTests(): Promise<void> {
   );
 
   // Loader-only
-  await timed('loader-only/map', () =>
-    callJson('/loader-only/map', { items: [1, 2, 3] }),
-  );
+  await timed('loader-only/map', () => callJson('/loader-only/map', { items: [1, 2, 3] }));
 
   // Errors
   await timed('errors/timeout (TimeoutError)', () => callJson('/errors/timeout'));
@@ -179,25 +186,30 @@ async function runTests(): Promise<void> {
 // ----- Bootstrap & teardown ----------------------------------------------
 
 async function main(): Promise<void> {
-  console.log('==> booting tests/prod/test-worker via wrangler dev --local');
-  const wrangler = spawn(
-    './node_modules/.bin/wrangler',
-    ['dev', '--ip', '0.0.0.0', '--port', String(PORT), 'src/index.ts'],
-    {
-      cwd: 'tests/prod/test-worker',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
-    },
-  );
+  let wrangler: ReturnType<typeof spawn> | undefined;
   const log: string[] = [];
-  wrangler.stdout?.on('data', (d) => log.push(String(d)));
-  wrangler.stderr?.on('data', (d) => log.push(String(d)));
+
+  if (REMOTE) {
+    console.log(`==> using deployed target ${BASE}`);
+  } else {
+    console.log('==> booting tests/prod/test-worker via wrangler dev --local');
+    wrangler = spawn(
+      './node_modules/.bin/wrangler',
+      ['dev', '--ip', '0.0.0.0', '--port', String(PORT), 'src/index.ts'],
+      {
+        cwd: 'tests/prod/test-worker',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
+      },
+    );
+    wrangler.stdout?.on('data', (d) => log.push(String(d)));
+    wrangler.stderr?.on('data', (d) => log.push(String(d)));
+  }
 
   let exitCode = 0;
   try {
     await waitForReady();
-    console.log(`==> worker ready at ${BASE}`);
-    console.log('');
+    console.log(`==> worker ready at ${BASE}\n`);
     await runTests();
     console.log('');
     const passed = results.filter((r) => r.ok).length;
@@ -206,8 +218,8 @@ async function main(): Promise<void> {
       `==> live E2E: ${passed}/${results.length} passed${failed > 0 ? `, ${failed} failed` : ''}`,
     );
     if (failed > 0) exitCode = 1;
-    // Slim payload — record name/ok/ms + topology-relevant fields,
-    // not the full test echoes.
+
+    // Slim payload — record name/ok/ms + topology-relevant fields.
     const slim = results.map((r) => {
       const out: BenchEntry = { name: r.name, ok: r.ok, ms: r.ms };
       if (!r.ok && r.error) out.error = r.error;
@@ -227,13 +239,9 @@ async function main(): Promise<void> {
       'bench-results.json',
       JSON.stringify(
         {
-          target: 'wrangler-dev-local',
+          target: REMOTE ? `live-edge:${REMOTE}` : 'wrangler-dev-local',
           ts: new Date().toISOString(),
-          summary: {
-            total: results.length,
-            passed: passed,
-            failed: failed,
-          },
+          summary: { total: results.length, passed, failed },
           results: slim,
         },
         null,
@@ -242,15 +250,16 @@ async function main(): Promise<void> {
     );
     console.log('==> wrote bench-results.json');
   } finally {
-    wrangler.kill('SIGTERM');
-    await new Promise((r) => setTimeout(r, 500));
-    writeFileSync(LOG_FILE, log.join(''));
-    try {
-      // Tear down the local DO state so subsequent runs are clean.
-      const { rmSync } = await import('node:fs');
-      rmSync('tests/prod/test-worker/.wrangler', { recursive: true, force: true });
-    } catch {
-      /* ignore */
+    if (wrangler) {
+      wrangler.kill('SIGTERM');
+      await new Promise((r) => setTimeout(r, 500));
+      writeFileSync(LOG_FILE, log.join(''));
+      try {
+        const { rmSync } = await import('node:fs');
+        rmSync('tests/prod/test-worker/.wrangler', { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
   }
   process.exit(exitCode);

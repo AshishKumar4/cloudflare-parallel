@@ -1,0 +1,260 @@
+{
+  "target": "https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev",
+  "ts": "2026-05-10T03:16:27.704Z",
+  "samples": 3,
+  "sizes": [
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512
+  ],
+  "aggregates": [
+    {
+      "size": 4,
+      "topology": "in-do",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        4
+      ],
+      "parallelSamplesMs": [
+        88,
+        71,
+        62
+      ],
+      "parallelMedianMs": 71,
+      "sequentialSamplesMs": [
+        90,
+        88,
+        114
+      ],
+      "sequentialMedianMs": 90,
+      "speedup": 1.27,
+      "sequentialMeasuredAtSize": 4
+    },
+    {
+      "size": 8,
+      "topology": "hybrid",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        2,
+        4,
+        4
+      ],
+      "parallelSamplesMs": [
+        547,
+        581,
+        518
+      ],
+      "parallelMedianMs": 547,
+      "sequentialSamplesMs": [
+        130,
+        129,
+        157
+      ],
+      "sequentialMedianMs": 130,
+      "speedup": 0.24,
+      "sequentialMeasuredAtSize": 8
+    },
+    {
+      "size": 16,
+      "topology": "hybrid",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "parallelSamplesMs": [
+        576,
+        530,
+        613
+      ],
+      "parallelMedianMs": 576,
+      "sequentialSamplesMs": [
+        306,
+        349,
+        383
+      ],
+      "sequentialMedianMs": 349,
+      "speedup": 0.61,
+      "sequentialMeasuredAtSize": 16
+    },
+    {
+      "size": 32,
+      "topology": "hybrid",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        8,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "parallelSamplesMs": [
+        586,
+        675,
+        615
+      ],
+      "parallelMedianMs": 615,
+      "sequentialSamplesMs": [
+        437,
+        414,
+        409
+      ],
+      "sequentialMedianMs": 414,
+      "speedup": 0.67,
+      "sequentialMeasuredAtSize": 32
+    },
+    {
+      "size": 64,
+      "topology": "hybrid",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        16,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "parallelSamplesMs": [
+        794,
+        789,
+        903
+      ],
+      "parallelMedianMs": 794,
+      "sequentialSamplesMs": [
+        1118,
+        1260,
+        1064
+      ],
+      "sequentialMedianMs": 1118,
+      "speedup": 1.41,
+      "sequentialMeasuredAtSize": 32
+    },
+    {
+      "size": 128,
+      "topology": "hybrid",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        32,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "parallelSamplesMs": [
+        1258,
+        1210,
+        1288
+      ],
+      "parallelMedianMs": 1258,
+      "sequentialSamplesMs": [
+        2040,
+        1892,
+        1780
+      ],
+      "sequentialMedianMs": 1892,
+      "speedup": 1.5,
+      "sequentialMeasuredAtSize": 32
+    },
+    {
+      "size": 256,
+      "topology": "tree",
+      "treeDepth": 2,
+      "fanOutPerLevel": [
+        1,
+        1,
+        32
+      ],
+      "parallelSamplesMs": [
+        1700,
+        1661,
+        1651
+      ],
+      "parallelMedianMs": 1661,
+      "sequentialSamplesMs": [
+        4240,
+        3720,
+        4792
+      ],
+      "sequentialMedianMs": 4240,
+      "speedup": 2.55,
+      "sequentialMeasuredAtSize": 32
+    },
+    {
+      "size": 512,
+      "topology": "tree",
+      "treeDepth": 3,
+      "fanOutPerLevel": [
+        1,
+        1,
+        1,
+        32
+      ],
+      "parallelSamplesMs": [
+        3671,
+        4314,
+        4387
+      ],
+      "parallelMedianMs": 4314,
+      "sequentialSamplesMs": [
+        8848,
+        9584,
+        7104
+      ],
+      "sequentialMedianMs": 8848,
+      "speedup": 2.05,
+      "sequentialMeasuredAtSize": 32
+    }
+  ]
+}

@@ -1,21 +1,21 @@
 {
-  "target": "wrangler-dev-local",
-  "ts": "2026-05-10T00:34:57.814Z",
+  "target": "live-edge:https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev",
+  "ts": "2026-05-10T03:16:49.127Z",
   "summary": {
-    "total": 31,
-    "passed": 31,
+    "total": 34,
+    "passed": 34,
     "failed": 0
   },
   "results": [
     {
       "name": "pool/submit",
       "ok": true,
-      "ms": 13
+      "ms": 22
     },
     {
       "name": "pool/map size=4",
       "ok": true,
-      "ms": 7,
+      "ms": 20,
       "data": {
         "topology": "in-do",
         "fanOutPerLevel": [
@@ -27,7 +27,7 @@
     {
       "name": "pool/map size=8",
       "ok": true,
-      "ms": 13,
+      "ms": 447,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -41,7 +41,7 @@
     {
       "name": "pool/map size=16",
       "ok": true,
-      "ms": 50,
+      "ms": 2535,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -57,7 +57,7 @@
     {
       "name": "pool/map size=32",
       "ok": true,
-      "ms": 45,
+      "ms": 542,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -77,7 +77,7 @@
     {
       "name": "pool/map size=64",
       "ok": true,
-      "ms": 111,
+      "ms": 708,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -105,7 +105,7 @@
     {
       "name": "pool/map size=128",
       "ok": true,
-      "ms": 160,
+      "ms": 1144,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -147,44 +147,78 @@
       }
     },
     {
+      "name": "pool/map size=256",
+      "ok": true,
+      "ms": 1593,
+      "data": {
+        "topology": "tree",
+        "fanOutPerLevel": [
+          1,
+          1,
+          32
+        ],
+        "treeDepth": 2
+      }
+    },
+    {
+      "name": "pool/map size=512",
+      "ok": true,
+      "ms": 3882,
+      "data": {
+        "topology": "tree",
+        "fanOutPerLevel": [
+          1,
+          1,
+          1,
+          32
+        ],
+        "treeDepth": 3
+      }
+    },
+    {
       "name": "pool/scatter",
       "ok": true,
-      "ms": 7
+      "ms": 22
     },
     {
       "name": "pool/reduce",
       "ok": true,
-      "ms": 3
+      "ms": 27
     },
     {
       "name": "pool/pmap",
       "ok": true,
-      "ms": 9
+      "ms": 20
     },
     {
       "name": "pool/pipe",
       "ok": true,
-      "ms": 13
+      "ms": 46
     },
     {
       "name": "pool/mapStream",
       "ok": true,
-      "ms": 4
+      "ms": 20
     },
     {
       "name": "pool/mapOrdered",
       "ok": true,
-      "ms": 4
+      "ms": 21
     },
     {
       "name": "pool/cancel (mid-flight)",
       "ok": true,
-      "ms": 5
+      "ms": 19
+    },
+    {
+      "name": "pool/warm",
+      "ok": true,
+      "ms": 31
     },
     {
       "name": "pool/stats",
       "ok": true,
-      "ms": 1,
+      "ms": 8,
       "data": {
         "topology": "in-do",
         "fanOutPerLevel": [],
@@ -194,47 +228,47 @@
     {
       "name": "actor/inc 1",
       "ok": true,
-      "ms": 15
+      "ms": 692
     },
     {
       "name": "actor/inc 2",
       "ok": true,
-      "ms": 4
+      "ms": 54
     },
     {
       "name": "actor/inc 3",
       "ok": true,
-      "ms": 3
+      "ms": 57
     },
     {
       "name": "actor/state",
       "ok": true,
-      "ms": 6
+      "ms": 34
     },
     {
       "name": "actor/close",
       "ok": true,
-      "ms": 6
+      "ms": 47
     },
     {
       "name": "scheduler/enqueue",
       "ok": true,
-      "ms": 15
+      "ms": 364
     },
     {
       "name": "scheduler/result",
       "ok": true,
-      "ms": 4
+      "ms": 19
     },
     {
       "name": "scheduler/enqueue idem",
       "ok": true,
-      "ms": 5
+      "ms": 18
     },
     {
       "name": "scheduler/stats",
       "ok": true,
-      "ms": 4,
+      "ms": 16,
       "data": {
         "topology": "in-do",
         "fanOutPerLevel": [],
@@ -244,37 +278,37 @@
     {
       "name": "scheduler/configure",
       "ok": true,
-      "ms": 2
+      "ms": 16
     },
     {
       "name": "scheduler/cancel-tenant",
       "ok": true,
-      "ms": 5
+      "ms": 16
     },
     {
       "name": "vm POST (no auth) → 401",
       "ok": true,
-      "ms": 3
+      "ms": 8
     },
     {
       "name": "vm POST (with auth) → 200",
       "ok": true,
-      "ms": 7
+      "ms": 21
     },
     {
       "name": "loader-only/map",
       "ok": true,
-      "ms": 2
+      "ms": 14
     },
     {
       "name": "errors/timeout (TimeoutError)",
       "ok": true,
-      "ms": 205
+      "ms": 206
     },
     {
       "name": "errors/aggregate (AggregateExecutionError)",
       "ok": true,
-      "ms": 7
+      "ms": 25
     }
   ]
 }

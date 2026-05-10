@@ -6,6 +6,30 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Live demo site** at [`cloudflare-parallel-demo.pages.dev`](https://cloudflare-parallel-demo.pages.dev)
+  — every primitive runnable as a CPU-bound interactive panel.
+- **Live test worker** at
+  [`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev).
+  Substrate validation + full library E2E run against this URL.
+- **Live edge bench** (`tests/prod/bench-live.ts`). Honest CPU-bound
+  speedup numbers per topology size, written to `bench-results-live.json`.
+- **CPU-vs-IO positioning** as a first-class invariant in `README.md`,
+  `DESIGN.md`, and the new `docs/when-to-use.md`.
+- **CPU-bound examples**: `embeddings-batch`, `raytracer`,
+  `genetic-algorithm`, `build-pipeline`. The library is for CPU-heavy
+  fan-out across V8 isolates.
+- **README API exposure pass.** Every public method on `Pool` /
+  `LoaderOnlyPool` / `ActorHandle` / `Scheduler` / `VM` is listed
+  with a short example.
+
+### Removed
+
+- I/O-bound examples (`research-agent`, `web-crawler`). Plain
+  `Promise.all` on a single isolate is the right tool for fanning
+  out `fetch` / `env.AI` / KV calls — this library is for CPU work.
+
 ## [0.3.0]
 
 Major rewrite. **Breaking changes** — see [`MIGRATION.md`](MIGRATION.md).

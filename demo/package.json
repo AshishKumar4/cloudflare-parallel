@@ -1,0 +1,14 @@
+{
+  "name": "cloudflare-parallel-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp ../bench-results-live.json public/bench-results-live.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "deploy": "npm run build && wrangler pages deploy public --project-name=cloudflare-parallel-demo --commit-dirty=true"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
+  }
+}

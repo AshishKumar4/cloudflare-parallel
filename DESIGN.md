@@ -28,6 +28,16 @@ internals). Migration path from v0.2 is in [`MIGRATION.md`](MIGRATION.md).
 
 The architecture must survive: a 4N-way composed fan-out under runtime contention; an LRU-thrash storm at 50/owner; a coordinator-DO restart mid-flight; a user fn that infinite-loops; a runtime where `cpuMs` limits aren't enforced (workerd today); STOR-5202-class FD pressure under deep tree fan-out. §11 enumerates these and the mitigations.
 
+### Invariant: CPU-bound parallelism only — first-class positioning
+
+This library exists for **CPU-bound parallel work** on Cloudflare Workers. It does **not** target I/O fan-out; the JavaScript event loop on a single isolate already interleaves I/O concurrently for free. Where this library wins is offloading user code to **N parallel V8 isolates** so that genuinely CPU-heavy tasks run on separate threads of the runtime, escaping the single-threaded V8 ceiling.
+
+**Use the library when:** each task burns ≥ 10 ms of CPU and you have ≥ 4 of them. Embeddings, hashing, signing, image transforms, parsing, simulation, codegen, evolutionary search, raytracing, build pipelines.
+
+**Do NOT use the library when:** you are awaiting I/O (`fetch`, `env.AI.run`, `env.KV.get`, `env.D1.prepare`, `env.R2.get`). Plain `Promise.all` on one isolate gives you that for free — the event loop suspends each pending await without consuming CPU. Adding fan-out across isolates buys nothing and pays 5-15 ms of dispatch overhead per task.
+
+This positioning is load-bearing for every API decision in this document. The 4N parallelism math, the tree extension, the topology selector, the `Pool` surface — all of it is justified by the CPU-bound use case. `docs/when-to-use.md` is the user-facing version of this invariant.
+
 ---
 
 ## §2 — Mental model
