@@ -18,11 +18,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { Parallel } from '../../src/api/parallel.js';
-import { submitCodeHandler } from '../../src/api/submit-code-handler.js';
-import { bearerAuth } from '../../src/api/auth.js';
-import { LIBRARY_INTERNAL_BINDINGS } from '../../src/loader/sandbox.js';
-import { PolicyRequiredError } from '../../src/errors/index.js';
+import { Parallel } from '../../src/api/parallel';
+import { submitCodeHandler } from '../../src/api/submit-code-handler';
+import { bearerAuth } from '../../src/api/auth';
+import { LIBRARY_INTERNAL_BINDINGS } from '../../src/loader/sandbox';
+import { PolicyRequiredError } from '../../src/errors/index';
 
 function makeReq(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('https://example.test/run', {

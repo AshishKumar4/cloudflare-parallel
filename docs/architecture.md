@@ -118,7 +118,7 @@ Loaded isolate's `env.signal` is a real AbortSignal driven by the stream.
 On first chunk, signal.aborted = true; pending awaits reject with reason.
 ```
 
-Sync infinite loops run to `cpuMs` (workerd has no `loader.abort(id)`
+Sync infinite loops run to `cpuMs` (the Worker Loader API has no `abort(id)` primitive
 yet); the runtime emits a `taskOrphan` event so users see the
 asymmetry in metrics.
 
@@ -135,15 +135,22 @@ asymmetry in metrics.
 
 ## Caching
 
-`cacheKeyStrategy: 'auto' | 'stable' | 'fresh'`:
+`cacheKeyStrategy: 'stable' | 'fresh' | 'auto'`:
 
-- `'stable'` — cache key is `fnHash`. Best when the fn is hot and you
-  want isolate reuse.
-- `'fresh'` — cache key includes a per-call salt. Defeats reuse;
-  useful when the fn captures stale values via `context`.
-- `'auto'` (default) — `'stable'` for the first 60s after the fn is
-  submitted; `'fresh'` after, on the assumption that long-lived hot
-  isolates may pin stale closures. Inflection documented in TSDoc.
+- `'stable'` (default across all factories) — cache key is `fnHash`. One
+  isolate per fn shape; best warmth and no eviction storms. Module-level
+  state in the loaded isolate persists between calls — user fns must not
+  rely on per-call freshness.
+- `'fresh'` — cache key includes a per-call salt. Defeats reuse; use
+  only when you genuinely need a clean V8 heap per submission (testing,
+  per-call sandboxing of distrusted code).
+- `'auto'` (opt-in) — buckets by 60-second windows. Fresh isolate per
+  shape per 60s window. Use only when (a) you have a small fixed set of
+  fn shapes AND (b) you actively want periodic isolate refresh. The
+  per-owner LRU is bounded to ~50 entries, so deployments that rotate
+  more than 50 distinct shape-windows per hour cause repeated
+  cold-start under `'auto'`. The default was switched from `'auto'` to
+  `'stable'` after a third-party review surfaced this thrash pattern.
 
 ## See also
 

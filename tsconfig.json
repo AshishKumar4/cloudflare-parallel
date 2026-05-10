@@ -2,23 +2,18 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ES2022",
-    "moduleResolution": "bundler",
+    "moduleResolution": "Bundler",
     "lib": ["ES2022", "ESNext.Disposable"],
     "types": ["@cloudflare/workers-types"],
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noUncheckedIndexedAccess": false,
-    "exactOptionalPropertyTypes": false
+    "allowImportingTsExtensions": false,
+    "noEmit": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist", "tests", "scripts"]
+  "exclude": ["node_modules", "dist"]
 }

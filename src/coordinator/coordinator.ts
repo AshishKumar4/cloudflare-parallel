@@ -1,8 +1,8 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { WorkerLoader } from '../types.js';
-import { LoaderRunner } from '../loader/runner.js';
-import { selectTopology } from '../topology/selector.js';
-import type { HybridPlan, TopologyPlan, TreePlan } from '../topology/plan.js';
+import type { WorkerLoader } from '../types';
+import { LoaderRunner } from '../loader/runner';
+import { selectTopology } from '../topology/selector';
+import type { HybridPlan, TopologyPlan, TreePlan } from '../topology/plan';
 import {
   errorToFailedResult,
   type ContextEnvelope,
@@ -11,9 +11,10 @@ import {
   type RunBatchRequest,
   type RunOneRequest,
   type RunOneResult,
-} from './protocol.js';
-import { getStub, wireToWorkerOptions } from './internal.js';
-import { forkCancelStream } from '../transport/cancel-stream.js';
+} from './protocol';
+import { getStub, wireToWorkerOptions, type LocationHint } from './internal';
+import { forkCancelStream } from '../transport/cancel-stream';
+import type { WorkerDOSession } from './worker-do';
 
 /**
  * `CfpCoordinator` — Pool's primary DO.
@@ -27,6 +28,13 @@ import { forkCancelStream } from '../transport/cancel-stream.js';
  * Topology selection is deterministic from `req.argsList.length`. The DO
  * never picks `loader-only` (that path lives in the caller's Worker via
  * `Parallel.loaderOnly()` and never enters the Coordinator).
+ *
+ * **Promise pipelining.** Hybrid and tree dispatch acquire a long-lived
+ * session per leaf via `stub.openSession()` / `stub.openTreeSession()`
+ * and chain the workload call without awaiting between calls. The
+ * runtime collapses these into a single round-trip per leaf
+ * (Cap'n Proto promise pipelining). Reference:
+ * https://developers.cloudflare.com/workers/runtime-apis/rpc/
  */
 export interface CoordinatorEnv {
   LOADER: WorkerLoader;
@@ -37,9 +45,16 @@ export interface CoordinatorEnv {
 }
 
 interface WorkerDOStub {
+  /** Pipelinable session — reuse one Cap'n Proto session per leaf. */
+  openSession(): WorkerDOSession;
+  /** Direct call form (kept for callers that don't need pipelining). */
   runBatch(req: RunBatchRequest): Promise<{ results: RunOneResult[] }>;
 }
 interface SubCoordStub {
+  openTreeSession(): SubCoordSessionLike;
+  dispatch(req: DispatchTreeRequest): Promise<{ results: RunOneResult[] }>;
+}
+interface SubCoordSessionLike {
   dispatch(req: DispatchTreeRequest): Promise<{ results: RunOneResult[] }>;
 }
 
@@ -64,8 +79,14 @@ export interface CoordinatorFanOutRequest {
     branchingFactor?: number;
     treeThreshold?: number;
   };
-  /** Live cancel stream forwarded into all loaded isolates (Item 4). */
+  /** Live cancel stream forwarded into all loaded isolates. */
   cancelStream?: ReadableStream<Uint8Array>;
+  /**
+   * Optional DO placement hint, passed to `namespace.get(id, { locationHint })`
+   * when materializing leaf DOs. Best-effort; only honored on first access.
+   * Reference: https://developers.cloudflare.com/durable-objects/reference/data-location/
+   */
+  locationHint?: LocationHint;
 }
 
 const ACTOR_STATE_KEY = 'cfp:actor-state';
@@ -78,7 +99,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     const runner = new LoaderRunner({
       loader: this.env.LOADER,
       callSite: 'do-method',
-      cacheKeyStrategy: request.cacheKeyStrategy ?? 'auto',
+      cacheKeyStrategy: request.cacheKeyStrategy ?? 'stable',
       workerOptions: wireToWorkerOptions(request.workerOptions, this.env as unknown as Record<string, unknown>),
       allowList: request.allowList,
     });
@@ -158,7 +179,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     const runner = new LoaderRunner({
       loader: this.env.LOADER,
       callSite: 'do-method',
-      cacheKeyStrategy: request.cacheKeyStrategy ?? 'auto',
+      cacheKeyStrategy: request.cacheKeyStrategy ?? 'stable',
       workerOptions: wireToWorkerOptions(request.workerOptions, this.env as unknown as Record<string, unknown>),
     });
     // Fork the upstream cancel stream so each parallel loader gets its own
@@ -216,9 +237,15 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
         const stub = getStub<WorkerDOStub>(
           ns,
           `${this.ctx.id.toString()}-${requestId}-leaf-${leafIdx}`,
+          request.locationHint,
         );
         try {
-          const result = await stub.runBatch({
+          // Promise pipelining: open a session and call runBatch on it
+          // without awaiting the session promise. The runtime sends
+          // openSession() and runBatch() in a single Cap'n Proto round-trip.
+          // Reference: https://developers.cloudflare.com/workers/runtime-apis/rpc/
+          const session = stub.openSession();
+          const result = await session.runBatch({
             fnSource: request.fnSource,
             fnHash: request.fnHash,
             context: request.context,
@@ -271,9 +298,13 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
         const stub = getStub<SubCoordStub>(
           ns,
           `${this.ctx.id.toString()}-${requestId}-sub-${subIdx}`,
+          request.locationHint,
         );
         try {
-          const result = await stub.dispatch({
+          // Promise pipelining: chain dispatch on the not-yet-resolved
+          // session promise so both calls travel in one round-trip.
+          const session = stub.openTreeSession();
+          const result = await session.dispatch({
             fnSource: request.fnSource,
             fnHash: request.fnHash,
             context: request.context,
@@ -287,6 +318,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
             maxFanOut: request.selector?.maxFanOut ?? 32,
             envelope: request.envelope,
             cancelStream: childStreams[subIdx],
+            locationHint: request.locationHint,
           });
           return result.results;
         } catch (err) {
@@ -382,16 +414,32 @@ function planSliceChildSizes(child: TreePlan | HybridPlan): number[] {
   return child.children.map((c) => c.size);
 }
 
-/** Fan-out widths per level for observability (PoolStats.fanOutPerLevel). */
+/**
+ * Fan-out widths per level for observability (PoolStats.fanOutPerLevel).
+ *
+ * Reports a list whose entries are the parallelism width at each tier,
+ * top to bottom. For the hybrid topology that's `[leafCount, …perLeafLoaderCounts]`;
+ * for the tree topology the report walks the leftmost branch top-down,
+ * appending the leaf count at the deepest tier and finally the per-leaf
+ * loader count (typically 4).
+ */
 function planFanOutPerLevel(plan: TopologyPlan): number[] {
   if (plan.topology === 'in-do' || plan.topology === 'loader-only') return [plan.size];
   if (plan.topology === 'hybrid') return [plan.leafShape.length, ...plan.leafShape];
-  // tree — first the root fan-out, then recurse into the first child for depth.
+  // tree — root fan-out first, then walk the leftmost branch reporting
+  // the children-count at each tier; at the deepest hybrid leaf, append
+  // the leaf count AND the per-leaf loader count so the user sees all
+  // multiplicative tiers.
   const widths: number[] = [plan.children.length];
   let cursor: TreePlan | HybridPlan | undefined = plan.children[0];
   while (cursor) {
     if (cursor.topology === 'hybrid') {
       widths.push(cursor.leafShape.length);
+      // Per-leaf loader count (the bottommost tier that gives 4N parallelism).
+      // Use the largest leaf in the shape; balanced shapes are uniform but
+      // the tail leaf may hold a remainder.
+      const maxLoadersPerLeaf = cursor.leafShape.reduce((a, b) => Math.max(a, b), 0);
+      widths.push(maxLoadersPerLeaf);
       break;
     }
     widths.push(cursor.children.length);

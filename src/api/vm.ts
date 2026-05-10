@@ -1,6 +1,6 @@
-import type { PoolEnv, PoolOptions, VMOptions } from './options.js';
-import { Pool } from './pool.js';
-import { submitCodeHandler, type SubmitCodePolicy } from './submit-code-handler.js';
+import type { PoolEnv, PoolOptions, VMOptions } from './options';
+import { Pool } from './pool';
+import { submitCodeHandler, type SubmitCodePolicy } from './submit-code-handler';
 
 /**
  * `Parallel.VM` — opinionated HTTP submit-code surface. Composes on top of

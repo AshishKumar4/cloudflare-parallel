@@ -28,7 +28,6 @@
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
-    "MIGRATION.md",
     "DESIGN.md",
     "docs"
   ],
@@ -51,17 +50,16 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsup",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src tests scripts examples --max-warnings=0",
-    "lint:fix": "eslint src tests scripts examples --fix",
-    "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts' 'scripts/**/*.ts' 'examples/**/*.ts'",
-    "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts' 'scripts/**/*.ts' 'examples/**/*.ts'",
+    "lint": "eslint src tests examples --max-warnings=0",
+    "lint:fix": "eslint src tests examples --fix",
+    "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts' 'examples/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts' 'examples/**/*.ts'",
     "test": "bun test tests/unit",
     "test:integration": "bun run tests/integration/run.ts",
     "test:prod": "bun run tests/prod/run.ts",
     "bench": "bun run tests/bench/run.ts",
-    "migrate": "bun run scripts/migrate-v02-v03.ts",
     "prepublishOnly": "bun run clean && bun run typecheck && bun run lint && bun run test && bun run build"
   },
   "devDependencies": {
@@ -69,6 +67,7 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.3.0",
     "prettier": "^3.8.3",
+    "tsup": "^8.5.1",
     "typescript": "^5.5.0",
     "typescript-eslint": "^8.59.2",
     "wrangler": "^3.60.0 || ^4.0.0"

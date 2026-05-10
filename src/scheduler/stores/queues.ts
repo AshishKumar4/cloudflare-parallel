@@ -1,5 +1,5 @@
-import type { JobStatus } from '../../api/options.js';
-import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store.js';
+import type { JobStatus } from '../../api/options';
+import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store';
 
 interface CFQueue<T = unknown> {
   send(message: T, opts?: { delaySeconds?: number }): Promise<void>;

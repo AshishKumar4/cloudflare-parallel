@@ -20,8 +20,8 @@ import {
   isExecutionError,
   isParallelError,
   isTimeoutError,
-} from '../../src/errors/index.js';
-import type { ParallelError } from '../../src/errors/index.js';
+} from '../../src/errors/index';
+import type { ParallelError } from '../../src/errors/index';
 
 describe('error type guards', () => {
   test('isParallelError matches class instances and CFP_* codes', () => {

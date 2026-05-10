@@ -13,7 +13,7 @@ import {
   SerializationError,
   TimeoutError,
   TopologyError,
-} from '../errors/index.js';
+} from '../errors/index';
 
 /**
  * Reconstruct a typed library error from the leaf-RPC wire shape carried in

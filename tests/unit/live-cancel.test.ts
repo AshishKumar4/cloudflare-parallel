@@ -11,8 +11,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { CancelToken } from '../../src/api/cancel.js';
-import { createCancelStream, forkCancelStream } from '../../src/transport/cancel-stream.js';
+import { CancelToken } from '../../src/api/cancel';
+import { createCancelStream, forkCancelStream } from '../../src/transport/cancel-stream';
 
 describe('CancelToken exposes a real AbortSignal', () => {
   it('signal is an AbortSignal instance', () => {

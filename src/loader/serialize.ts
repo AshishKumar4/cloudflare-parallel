@@ -1,27 +1,35 @@
-import { SerializationError } from '../errors/index.js';
-import type { UserFn } from '../api/user-fn.js';
+import { SerializationError } from '../errors/index';
+import type { UserFn } from '../api/user-fn';
 
 /**
- * `fn.toString()` -> serializable source, with the v0.2 guard rails:
+ * `fn.toString()` -> serializable source, with guard rails:
  * - reject native functions (`[native code]`)
- * - reject `this` references in non-actor mode (DO loaded code has no
- *   meaningful `this`); actor mode uses explicit `(state, sql, ...args)`
- *   so the rejection still applies — we never bind `this`.
+ * - reject `this` references (loaded isolates have no meaningful `this`).
  *
- * The cancel-signal is delivered via `env.signal`, NOT a positional arg
- * (DESIGN ADR-5 revised), so the v0.2 closure-capture caveats are unchanged.
+ * Cancellation is delivered via `env.signal` rather than a positional
+ * argument (see DESIGN ADR-5).
+ *
+ * **Bundler shim stripping.** When the caller's Worker is bundled with
+ * esbuild (the default for Wrangler), `Function.prototype.toString()`
+ * returns source decorated with esbuild's `__name(fn, "name")` and
+ * `__publicField(...)` runtime helpers. Those helpers are not defined
+ * inside the freshly-loaded isolate, so we strip them at serialize time:
+ * `__name(<expr>, "...")` collapses to `<expr>`, and `__publicField(this,
+ * "x", v)` collapses to `this.x = v`. This is a thin shim, not a code
+ * rewrite — semantics are preserved.
  */
 export function serializeFunction(fn: UserFn): string {
   if (typeof fn !== 'function') {
     throw new SerializationError(`Expected a function, got ${typeof fn}`);
   }
-  const source = fn.toString();
-  if (source.includes('[native code]')) {
+  const raw = fn.toString();
+  if (raw.includes('[native code]')) {
     throw new SerializationError(
       `Cannot serialize native function: ${fn.name || '(anonymous)'}. ` +
         'Only user-defined functions can be dispatched to remote isolates.',
     );
   }
+  const source = stripBundlerShims(raw);
   if (/\bthis\b/.test(source)) {
     throw new SerializationError(
       `Function "${fn.name || '(anonymous)'}" references \`this\`, which is ` +
@@ -30,6 +38,39 @@ export function serializeFunction(fn: UserFn): string {
     );
   }
   return source;
+}
+
+/**
+ * Strip esbuild bundler-runtime shims from a function source string.
+ *
+ * - `__name(expr, "literal")` → `expr` (the second arg is always a
+ *   string literal — esbuild generates this exclusively for assigning
+ *   `Function.prototype.name`).
+ * - `__publicField(target, "field", value)` → `target.field = value`
+ *   (esbuild emits this for class field initializers).
+ *
+ * Implementation note: regex-based stripping is sufficient because
+ * esbuild's emitted patterns are mechanical and deterministic. We do
+ * not attempt to handle hand-written calls to identifiers named
+ * `__name` (the convention is reserved for tooling).
+ */
+function stripBundlerShims(src: string): string {
+  let out = src;
+  // __name(expr, "literal") — collapse to `expr`. The second arg is
+  // always a double- or single-quoted string with no embedded quotes
+  // (esbuild emits the original identifier name verbatim).
+  out = out.replace(/__name\(\s*([\s\S]*?)\s*,\s*(?:"[^"]*"|'[^']*')\s*\)/g, '$1');
+  // __publicField(target, "field"|literal, value) — for class field init.
+  out = out.replace(
+    /__publicField\(\s*([^,]+?)\s*,\s*("[^"]*"|'[^']*'|[A-Za-z_$][A-Za-z0-9_$]*)\s*,\s*([\s\S]+?)\s*\)\s*;?/g,
+    (_m, target: string, key: string, value: string) => {
+      const accessor = key.startsWith('"') || key.startsWith("'")
+        ? `[${key}]`
+        : `.${key}`;
+      return `${target}${accessor} = ${value};`;
+    },
+  );
+  return out;
 }
 
 /** djb2 — fast, deterministic, NOT cryptographic. Used only for cache-key differentiation. */

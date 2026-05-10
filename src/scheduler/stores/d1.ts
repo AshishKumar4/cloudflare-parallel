@@ -1,5 +1,5 @@
-import type { JobStatus } from '../../api/options.js';
-import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store.js';
+import type { JobStatus } from '../../api/options';
+import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store';
 
 /**
  * D1 (SQL over HTTP/RPC) adapter — minimal implementation that mirrors the

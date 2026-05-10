@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { rejectIfRpcStub, validateReturn } from '../../src/loader/return-validator.js';
-import { ReturnTooLargeError, SerializationError } from '../../src/errors/index.js';
+import { rejectIfRpcStub, validateReturn } from '../../src/loader/return-validator';
+import { ReturnTooLargeError, SerializationError } from '../../src/errors/index';
 
 describe('validateReturn', () => {
   it('passes small values through', () => {

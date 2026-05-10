@@ -7,7 +7,7 @@ reassembled into a PPM image.
 ## Why this example
 
 This is the canonical "embarrassingly parallel CPU work" demo. Every
-ray costs ~50 µs on workerd; a 192-row tile of a 320-wide image is
+ray costs ~50 µs on the Workers runtime; a 192-row tile of a 320-wide image is
 ~60k rays = a couple of seconds single-threaded. Splitting across
 N tiles and N isolates collapses wall-clock by the parallelism factor.
 

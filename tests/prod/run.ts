@@ -7,7 +7,7 @@
  *      our topology selector relies on still hold upstream.
  *
  *   2. Live library E2E via `wrangler dev --local` — boots a real
- *      workerd with the library's DO + Worker Loader bindings,
+ *      the Workers runtime with the library's DO + Worker Loader bindings,
  *      exercises every primitive over HTTP. No deploy, no account
  *      credentials needed.
  *

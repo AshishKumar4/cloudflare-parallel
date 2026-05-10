@@ -17,7 +17,7 @@ The pipeline runs five stages on each file:
 4. Mock minification (rename short identifiers).
 5. SHA-256 hash the output.
 
-Per-file: ~10-50 ms on workerd CPU. 200 files single-threaded ≈ several
+Per-file: ~10-50 ms on the Workers runtime CPU. 200 files single-threaded ≈ several
 seconds. `pool.map` runs them across N parallel V8 isolates.
 
 ## What it shows

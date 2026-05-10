@@ -1,7 +1,7 @@
-import { BindingError, MissingBindingError, ResultExpiredError } from '../errors/index.js';
-import { hashSource, serializeFunction } from '../loader/serialize.js';
-import { wireToError } from './error-decode.js';
-import { emitObservabilityEvent } from '../observability/index.js';
+import { BindingError, MissingBindingError, ResultExpiredError } from '../errors/index';
+import { hashSource, serializeFunction } from '../loader/serialize';
+import { wireToError } from './error-decode';
+import { emitObservabilityEvent } from '../observability/index';
 import type {
   Job,
   JobHandle,
@@ -10,8 +10,8 @@ import type {
   RetryPolicy,
   SchedulerOptions,
   SchedulerStats,
-} from './options.js';
-import type { SchedulerEnqueueRequest } from '../scheduler/scheduler-do.js';
+} from './options';
+import type { SchedulerEnqueueRequest } from '../scheduler/scheduler-do';
 
 interface SchedulerStub {
   enqueue(req: SchedulerEnqueueRequest): Promise<{ id: string }>;

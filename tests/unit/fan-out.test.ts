@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { runFanOut } from '../../src/api/fan-out.js';
-import { AggregateExecutionError } from '../../src/errors/index.js';
+import { runFanOut } from '../../src/api/fan-out';
+import { AggregateExecutionError } from '../../src/errors/index';
 
 describe('runFanOut', () => {
   it('returns all results on success', async () => {

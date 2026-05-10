@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { pickBindings } from '../../src/api/bindings.js';
+import { pickBindings } from '../../src/api/bindings';
 
 describe('pickBindings', () => {
   test('narrows env to named keys', () => {

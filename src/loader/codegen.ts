@@ -1,5 +1,5 @@
-import type { WorkerCode, WorkerCodeLimits, ServiceStub } from '../types.js';
-import { assertValidContextKey, canonicalizeContext } from './serialize.js';
+import type { WorkerCode, WorkerCodeLimits, ServiceStub } from '../types';
+import { assertValidContextKey, canonicalizeContext } from './serialize';
 
 /** Default compatibility date — picks up `enable_ctx_exports` and `rpc_params_dup_stubs`. */
 export const DEFAULT_COMPAT_DATE = '2026-01-20';
@@ -96,7 +96,7 @@ export function generateWorkerSource(fnSource: string | null, opts: GenerateSour
   // ('abort', ...)`, and `env.signal.throwIfAborted()`. They can also pass
   // `env.signal` directly to `fetch(url, { signal: env.signal })` etc.
   //
-  // Drop-in for `env.LOADER.abort(id)`: when that ships in workerd, the
+  // Drop-in for `env.LOADER.abort(id)`: when that primitive ships, the
   // coordinator additionally calls `loader.abort(taskId)` — public API
   // unchanged.
   if (opts.injectCancelSignal) {
@@ -191,8 +191,8 @@ export function generateWorkerSource(fnSource: string | null, opts: GenerateSour
     lines.push('  }', '}');
   } else if (opts.mode === 'actor-class' && fnSource) {
     // The user fn is baked into the module at build time so the loaded
-    // isolate doesn't need `eval` to materialize it (workerd disallows
-    // `eval` by default). The loader cache key varies by fnSource hash,
+    // isolate doesn't need `eval` to materialize it (the Workers runtime
+    // disallows `eval` by default). The loader cache key varies by fnSource hash,
     // so each distinct fn submitted to the same actor gets its own
     // isolate — state still persists in the actor coordinator DO.
     lines.push(`const __fn__ = ${fnSource};`, '');

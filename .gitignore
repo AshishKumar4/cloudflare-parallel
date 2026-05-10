@@ -8,6 +8,10 @@ dist/
 *.log
 .DS_Store
 coverage/
+# Local-build tarball used by the prod-test worker to install the library
+# without recursive `file:` copying. Rebuilt by `npm pack` in the
+# scripts/refresh-test-worker-tgz.sh helper.
+tests/prod/test-worker/cloudflare-parallel-pkg.tgz
 examples/*/node_modules/
 examples/*/dist/
 examples/*/.wrangler/

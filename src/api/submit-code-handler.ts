@@ -1,6 +1,6 @@
-import { PolicyRequiredError, errorToWire, type WireError } from '../errors/index.js';
-import type { Pool } from './pool.js';
-import type { SubmitOptions } from './options.js';
+import { PolicyRequiredError, errorToWire, type WireError } from '../errors/index';
+import type { Pool } from './pool';
+import type { SubmitOptions } from './options';
 
 /**
  * Shared HTTP submit-code primitive used by both `pool.handle()` and
@@ -191,8 +191,8 @@ export function submitCodeHandler<B extends Record<string, unknown>>(
     const restrictedPool = restrictPoolBindings(opts.pool, policy.allowBindings ?? []);
 
     try {
-      // The submitted source is shipped to the loader directly — workerd
-      // disables `eval` in the parent Worker, so we never round-trip
+      // The submitted source is shipped to the loader directly — the
+      // Workers runtime disables `eval` in the parent Worker, so we never round-trip
       // through `Function.prototype.toString()`. The loader is the
       // platform-sanctioned path for dynamic code; the loaded isolate
       // runs in its own V8 context with `globalOutbound: null` and no

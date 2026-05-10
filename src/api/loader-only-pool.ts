@@ -1,18 +1,18 @@
-import { BindingError } from '../errors/index.js';
+import { BindingError } from '../errors/index';
 import type {
   LoaderOnlyOptions,
   MapOptions,
   PmapOptions,
   ScatterOptions,
   SubmitOptions,
-} from './options.js';
-import { LoaderRunner } from '../loader/runner.js';
-import { hashSource, serializeFunction } from '../loader/serialize.js';
-import type { UserFn } from './user-fn.js';
-import { buildEnvelope } from '../transport/deadline-prop.js';
-import { dispatchWithResilience } from '../transport/rpc-client.js';
-import { runFanOut, type FanOutMode } from './fan-out.js';
-import type { PoolEnv } from './options.js';
+} from './options';
+import { LoaderRunner } from '../loader/runner';
+import { hashSource, serializeFunction } from '../loader/serialize';
+import type { UserFn } from './user-fn';
+import { buildEnvelope } from '../transport/deadline-prop';
+import { dispatchWithResilience } from '../transport/rpc-client';
+import { runFanOut, type FanOutMode } from './fan-out';
+import type { PoolEnv } from './options';
 
 
 /**
@@ -72,7 +72,7 @@ export class LoaderOnlyPoolImpl<
     this.#runner = new LoaderRunner({
       loader: env.LOADER,
       callSite: 'fetch-handler',
-      cacheKeyStrategy: opts.cacheKeyStrategy ?? 'auto',
+      cacheKeyStrategy: opts.cacheKeyStrategy ?? 'stable',
       workerOptions: {
         ...opts.workerOptions,
         globalOutbound:

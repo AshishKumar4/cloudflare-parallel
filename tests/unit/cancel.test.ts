@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { CancelToken } from '../../src/api/cancel.js';
-import { CancelledError } from '../../src/errors/index.js';
+import { CancelToken } from '../../src/api/cancel';
+import { CancelledError } from '../../src/errors/index';
 
 describe('CancelToken', () => {
   it('starts not cancelled', () => {

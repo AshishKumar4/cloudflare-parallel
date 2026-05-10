@@ -19,7 +19,7 @@ just resumes on the next tick of the same thread.
 
 This library exists to escape that single-thread-of-execution constraint
 by spawning user code into separate V8 isolates. Each isolate has its
-own heap and its own thread-of-execution slot in workerd. Three CPU-heavy
+own heap and its own thread-of-execution slot in the Workers runtime. Three CPU-heavy
 tasks across three isolates run in genuine parallel — wall-clock ~100 ms.
 
 ## Decision matrix

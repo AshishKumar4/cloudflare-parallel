@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import type {
-  ParallelError} from '../../src/errors/index.js';
+  ParallelError} from '../../src/errors/index';
 import {
   AggregateExecutionError,
   BackpressureError,
@@ -33,7 +33,7 @@ import {
   TopologyError,
   errorToWire,
   wireToError,
-} from '../../src/errors/index.js';
+} from '../../src/errors/index';
 
 function roundtrip<T extends ParallelError>(err: T): ParallelError {
   const wire = JSON.parse(JSON.stringify(errorToWire(err)));

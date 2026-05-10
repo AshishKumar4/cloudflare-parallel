@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { canonicalizeContext, hashSource, serializeFunction } from '../../src/loader/serialize.js';
-import { SerializationError } from '../../src/errors/index.js';
+import { canonicalizeContext, hashSource, serializeFunction } from '../../src/loader/serialize';
+import { SerializationError } from '../../src/errors/index';
+import type { UserFn } from '../../src/api/user-fn';
 
 describe('serializeFunction', () => {
   it('serializes arrow functions', () => {
@@ -38,6 +39,77 @@ describe('serializeFunction', () => {
       },
     };
     expect(() => serializeFunction(obj.fn)).toThrow(SerializationError);
+  });
+
+  // ---- bundler-shim stripping ------------------------------------------
+  // esbuild (the default Wrangler bundler) wraps named function values with
+  // `__name(fn, "literal")` to preserve `Function.prototype.name`. The
+  // wrapper is not defined in the loaded isolate, so calling
+  // `Function.prototype.toString()` on a bundled fn ships dead references.
+  // serializeFunction strips the wrappers at serialize time.
+  //
+  // We test the stripping by passing a fn whose source string already
+  // contains the wrappers — bun-test runs unbundled, so we construct a
+  // fn whose `.toString()` returns the wrapped form by overriding it.
+  describe('bundler-shim stripping', () => {
+    function fnWithSource(sourceText: string): UserFn {
+      // Construct a real callable; override .toString() to return the
+      // bundled-looking source text.
+      const real = (x: unknown) => x;
+      Object.defineProperty(real, 'toString', {
+        value: () => sourceText,
+        enumerable: false,
+      });
+      return real as UserFn;
+    }
+
+    it('strips a single __name(arrow, "name") wrapper', () => {
+      const fn = fnWithSource('__name((x) => x * 2, "double")');
+      const stripped = serializeFunction(fn);
+      expect(stripped).not.toContain('__name(');
+      expect(stripped).toContain('=>');
+      expect(stripped).toContain('x * 2');
+    });
+
+    it('strips __name with single-quoted name', () => {
+      const fn = fnWithSource("__name(function (n) { return n; }, 'single')");
+      const stripped = serializeFunction(fn);
+      expect(stripped).not.toContain('__name(');
+    });
+
+    it('strips multiple __name calls in one source', () => {
+      const fn = fnWithSource(
+        'function outer() {\n' +
+          '  const inner = __name((x) => x + 1, "inner");\n' +
+          '  const other = __name(function double(y) { return y * 2; }, "double");\n' +
+          '  return [inner, other];\n' +
+          '}',
+      );
+      const stripped = serializeFunction(fn);
+      expect(stripped).not.toContain('__name(');
+      expect(stripped).toContain('x + 1');
+      expect(stripped).toContain('y * 2');
+    });
+
+    it('strips __publicField shim into property assignment', () => {
+      const fn = fnWithSource(
+        'function () {\n' +
+          '  var obj = {};\n' +
+          '  __publicField(obj, "k", 42);\n' +
+          '  return obj;\n' +
+          '}',
+      );
+      const stripped = serializeFunction(fn);
+      expect(stripped).not.toContain('__publicField(');
+      expect(stripped).toContain('"k"');
+      expect(stripped).toContain('42');
+    });
+
+    it('preserves source that has no shims', () => {
+      const fn = fnWithSource('(x) => x * 2');
+      const stripped = serializeFunction(fn);
+      expect(stripped).toBe('(x) => x * 2');
+    });
   });
 });
 

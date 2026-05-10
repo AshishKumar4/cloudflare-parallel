@@ -1,8 +1,30 @@
-import type { ServiceStub, WorkerCodeLimits, WorkerLoader } from '../types.js';
-import type { SubmitCodePolicy } from './submit-code-handler.js';
-import type { CancelToken } from './cancel.js';
-import type { Topology } from '../topology/selector.js';
-import type { CacheKeyStrategy } from '../loader/cache-key.js';
+import type { ServiceStub, WorkerCodeLimits, WorkerLoader } from '../types';
+import type { SubmitCodePolicy } from './submit-code-handler';
+import type { CancelToken } from './cancel';
+import type { Topology } from '../topology/selector';
+import type { CacheKeyStrategy } from '../loader/cache-key';
+import type { LocationHint } from '../coordinator/internal';
+import type {
+  CoordinatorRunRequest,
+  CoordinatorFanOutRequest,
+  RunOneResult,
+} from '../coordinator/protocol';
+
+/**
+ * Shape of a `ctx.exports.<WorkerEntrypoint>` loopback binding. The
+ * library accepts an opaque object with `runOne` / `runMany` so users can
+ * pass `ctx.exports.CfpInProcessCoordinator` (a WorkerEntrypoint stub)
+ * directly without TypeScript complaining about generic Cloudflare types.
+ */
+export interface InProcessCoordinatorBinding {
+  runOne(request: CoordinatorRunRequest): Promise<RunOneResult>;
+  runMany(request: CoordinatorFanOutRequest): Promise<{
+    results: RunOneResult[];
+    topology: 'in-do';
+    fanOutPerLevel: number[];
+    treeDepth: number;
+  }>;
+}
 
 // ---- env shape --------------------------------------------------------
 
@@ -15,6 +37,10 @@ import type { CacheKeyStrategy } from '../loader/cache-key.js';
  *   - `CfpWorkerDO`    — Worker DO namespace (hybrid leaves)
  *   - `CfpSubCoord`    — Sub-coordinator DO namespace (tree)
  *   - `CfpSchedulerDO` — Scheduler DO namespace
+ *
+ * The in-process coordinator (`CfpInProcessCoordinator`) is wired up
+ * via `PoolOptions.inProcess` rather than `env`, since it lives on the
+ * `ctx.exports` shape and is not a Durable Object namespace binding.
  */
 export interface PoolEnv {
   LOADER: WorkerLoader;
@@ -139,6 +165,39 @@ export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unk
   workerOptions?: WorkerCodeOptions;
   /** Coordinator DO id. Default = a stable per-Worker id. */
   coordinatorId?: string;
+  /**
+   * In-process coordinator loopback. Pass
+   * `ctx.exports.CfpInProcessCoordinator` here to bypass the Coordinator
+   * Durable Object for small fan-outs (size ≤ 4) and single-shot
+   * `submit` calls. The loopback stays inside the same Worker process,
+   * dropping per-call dispatch overhead from tens of milliseconds (DO RPC)
+   * to a couple of milliseconds (in-process Cap'n Proto).
+   *
+   * Larger fan-outs still flow through the Coordinator DO (which fans out
+   * across leaf DOs to compose 4N parallelism).
+   *
+   * Reference: https://developers.cloudflare.com/workers/runtime-apis/context/
+   */
+  inProcess?: InProcessCoordinatorBinding;
+  /**
+   * Region hint forwarded to `namespace.get(id, { locationHint })` when
+   * materializing leaf DOs. Use to colocate freshly-created DOs with the
+   * caller. Honored only on first access of each DO; subsequent gets are
+   * sticky.
+   *
+   * If omitted and a request's `cf.colo` is available via
+   * {@link PoolOptions.requestColo}, the library auto-derives a region from
+   * the colo code.
+   *
+   * Reference: https://developers.cloudflare.com/durable-objects/reference/data-location/
+   */
+  locationHint?: LocationHint;
+  /**
+   * Optional caller colo (e.g. `'SFO'`). Pass `request.cf?.colo as string`
+   * if you have a request handy. The library will pick a `locationHint`
+   * for you if `locationHint` is not set.
+   */
+  requestColo?: string;
 }
 
 export interface LoaderOnlyOptions<B = Record<string, unknown>, C = Record<string, unknown>> {

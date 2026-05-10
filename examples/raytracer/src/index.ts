@@ -6,7 +6,7 @@
  * Lambertian shading + sphere reflections). Tiles are reassembled into
  * a PPM image returned to the client.
  *
- * Pure CPU: each ray costs ~50 µs on workerd; a 256-row tile of a
+ * Pure CPU: each ray costs ~50 µs on the Workers runtime; a 256-row tile of a
  * 320-wide image is ~80k rays = ~4s per tile single-threaded. Splitting
  * into 16 tiles and running across 16 isolates collapses wall-clock by
  * the parallelism factor.

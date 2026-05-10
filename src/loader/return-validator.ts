@@ -1,4 +1,4 @@
-import { ReturnTooLargeError, SerializationError } from '../errors/index.js';
+import { ReturnTooLargeError, SerializationError } from '../errors/index';
 
 /**
  * Soft threshold: above this we should auto-stream when possible (the

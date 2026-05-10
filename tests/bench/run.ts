@@ -15,8 +15,8 @@
  * loader call costs in production.
  */
 
-import { Parallel } from '../../src/api/parallel.js';
-import { selectTopology } from '../../src/topology/selector.js';
+import { Parallel } from '../../src/api/parallel';
+import { selectTopology } from '../../src/topology/selector';
 
 interface Stat {
   p50: number;

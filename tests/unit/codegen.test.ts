@@ -3,7 +3,7 @@ import {
   buildWorkerCode,
   generateWorkerSource,
   DEFAULT_COMPAT_DATE,
-} from '../../src/loader/codegen.js';
+} from '../../src/loader/codegen';
 
 describe('generateWorkerSource', () => {
   it('emits a pool-fn module with execute() that injects env.signal', () => {

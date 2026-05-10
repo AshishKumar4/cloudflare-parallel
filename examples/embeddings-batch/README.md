@@ -5,7 +5,7 @@ CPU-bound vector embeddings over thousands of docs, parallelized across V8 isola
 ## Why this example
 
 Each doc is hashed into a 256-dim feature vector via deterministic hashing
-+ mixing passes. ~1-3 ms per doc on workerd. Single-threaded JS would
++ mixing passes. ~1-3 ms per doc on the Workers runtime. Single-threaded JS would
 serialize all N docs behind the event loop. `pool.map` runs them across
 N parallel V8 isolates so the wall-clock is bounded by the slowest one,
 not the sum.

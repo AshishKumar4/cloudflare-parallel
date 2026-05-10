@@ -14,8 +14,29 @@
  * while the caller has moved on.
  */
 
-// Per-V8-isolate cache lives on `globalThis` so DO methods on the same
-// isolate share one budget. Type stays narrow per-key (set/get below).
+// Per-V8-isolate cache lives on `globalThis`.
+//
+// **The per-isolate invariant.** A V8 isolate is a closed world: each
+// isolate has its own heap, its own bag-of-globals, and its own
+// `globalThis`. There is no shared module state across isolates — every
+// `import` in a Worker bundle evaluates per-isolate, every top-level
+// `let` is per-isolate, and every property assigned to `globalThis` is
+// per-isolate by construction. Two DO instances on the same metal but
+// in different isolates do not see each other's `globalThis.cfpLoaderSem`.
+//
+// We rely on this for the loader semaphore: the runtime's
+// `env.LOADER.get(...)` cap is enforced per-isolate (3 from a fetch
+// handler, 4 from a DO method), so we want a single semaphore per
+// isolate to gate calls into the loader. Stashing it on `globalThis`
+// gives us exactly that without any cross-isolate communication.
+//
+// **Critical: not a singleton across the deployment.** Each DO
+// instance has its own isolate, so each DO has its own semaphore. The
+// hybrid topology composes 4 × N parallelism precisely because the
+// `cfpLoaderSem` on `CfpWorkerDO` instance #1 is independent of the
+// one on instance #2.
+//
+// Reference: https://developers.cloudflare.com/workers/reference/how-workers-works/
 interface LoaderBudgetGlobals {
   cfpLoaderCap?: number;
   cfpLoaderSem?: LoaderSemaphore;

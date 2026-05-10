@@ -7,7 +7,7 @@
  * cheap individually, but a population of 256 over 30 generations is
  * 7,680 fitness evaluations. Each tour evaluation includes a heavy
  * 2-opt local-search refinement (O(n²) per evaluation) so each task
- * is genuinely CPU-bound (~5-15 ms on workerd).
+ * is genuinely CPU-bound (~5-15 ms on the Workers runtime).
  *
  * Single-threaded JS would serialize all 256 evaluations behind the
  * event loop. `pool.map` runs them across N parallel V8 isolates, so

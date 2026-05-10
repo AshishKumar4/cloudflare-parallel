@@ -1,9 +1,9 @@
-import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
-import type { WorkerLoader } from '../types.js';
-import { LoaderRunner } from '../loader/runner.js';
-import { errorToFailedResult, type RunBatchRequest, type RunBatchResult } from './protocol.js';
-import { wireToWorkerOptions } from './internal.js';
-import { forkCancelStream } from '../transport/cancel-stream.js';
+import { DurableObject, RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
+import type { WorkerLoader } from '../types';
+import { LoaderRunner } from '../loader/runner';
+import { errorToFailedResult, type RunBatchRequest, type RunBatchResult } from './protocol';
+import { wireToWorkerOptions } from './internal';
+import { forkCancelStream } from '../transport/cancel-stream';
 
 /**
  * `CfpWorkerDO` — Hybrid-topology leaf.
@@ -14,54 +14,107 @@ import { forkCancelStream } from '../transport/cancel-stream.js';
  *
  * Each leaf RPC is independent of any other leaf: the parent Coordinator
  * fan-outs across N leaves and N's loader budgets compose to 4N.
+ *
+ * **Promise pipelining.** Callers can obtain a long-lived
+ * {@link WorkerDOSession} via `stub.openSession()` and chain
+ * `runBatch(...)` calls on the session without awaiting between calls. The
+ * runtime's RPC pipeline (Cap'n Proto promise pipelining) collapses chained
+ * calls on the same session into a single round-trip. The Coordinator
+ * uses this for hybrid/tree fan-out so each leaf DO is exercised through
+ * a single Cap'n Proto session per request.
+ *
+ * Reference: https://developers.cloudflare.com/workers/runtime-apis/rpc/
  */
 export interface WorkerDOEnv {
   LOADER: WorkerLoader;
 }
 
-export class CfpWorkerDO extends DurableObject<WorkerDOEnv> {
-  async runBatch(request: RunBatchRequest): Promise<RunBatchResult> {
-    const runner = new LoaderRunner({
-      loader: this.env.LOADER,
-      callSite: 'do-method',
-      cacheKeyStrategy: request.cacheKeyStrategy ?? 'auto',
-      workerOptions: wireToWorkerOptions(request.workerOptions, this.env as unknown as Record<string, unknown>),
-    });
-
-    // Fork the upstream cancel stream so each of the 4 in-DO loaders gets
-    // its own single-reader copy. Live cancel propagates to all of them.
-    const childStreams = forkCancelStream(request.cancelStream, request.argsList.length);
-
-    // The 4-loader cap is enforced by `LoaderRunner` (semaphore) — we can
-    // safely Promise.all here; the semaphore queues anything beyond cap.
-    const results = await Promise.all(
-      request.argsList.map(async (args, i) => {
-        try {
-          const value = await runner.runOne({
-            fnSource: request.fnSource,
-            fnHash: request.fnHash,
-            context: request.context,
-            // Inherit the DO's own bindings (the user-Worker env merged into
-            // the DO via wrangler.toml). Library-internal bindings are
-            // filtered by sanitizeBindings inside runOne.
-            bindings: this.env as unknown as Record<string, unknown>,
-            envelope: {
-              ...request.envelope,
-              cancelTokenId: undefined,
-              mode: 'pool-fn' as const,
-            },
-            args,
-            freshIsolate: request.freshIsolate,
-            cancelStream: childStreams[i],
-          });
-          return { ok: true as const, value };
-        } catch (err) {
-          return errorToFailedResult(err);
-        }
-      }),
-    );
-    return { results };
+/**
+ * Long-lived per-leaf session returned by `openSession`. Methods invoked
+ * on this target ride the same RPC session as the call that produced
+ * it, enabling promise pipelining and amortizing routing setup across
+ * multiple calls in a single request.
+ */
+export class WorkerDOSession extends RpcTarget {
+  readonly #env: WorkerDOEnv;
+  constructor(env: WorkerDOEnv) {
+    super();
+    this.#env = env;
   }
+
+  async runBatch(request: RunBatchRequest): Promise<RunBatchResult> {
+    return runBatchOnEnv(this.#env, request);
+  }
+}
+
+export class CfpWorkerDO extends DurableObject<WorkerDOEnv> {
+  /**
+   * Open a pipelinable session against this leaf. Subsequent calls on
+   * the returned target reuse the same RPC session — the second method
+   * invocation is sent without waiting for `openSession()` to resolve,
+   * collapsing N method calls into one round-trip.
+   */
+  openSession(): WorkerDOSession {
+    return new WorkerDOSession(this.env);
+  }
+
+  /** Direct call form (kept for backward compat / single-batch dispatch). */
+  async runBatch(request: RunBatchRequest): Promise<RunBatchResult> {
+    return runBatchOnEnv(this.env, request);
+  }
+}
+
+/**
+ * Internal: shared between `CfpWorkerDO.runBatch` and the pipelinable
+ * `WorkerDOSession.runBatch`.
+ */
+async function runBatchOnEnv(
+  env: WorkerDOEnv,
+  request: RunBatchRequest,
+): Promise<RunBatchResult> {
+  const runner = new LoaderRunner({
+    loader: env.LOADER,
+    callSite: 'do-method',
+    cacheKeyStrategy: request.cacheKeyStrategy ?? 'stable',
+    workerOptions: wireToWorkerOptions(
+      request.workerOptions,
+      env as unknown as Record<string, unknown>,
+    ),
+  });
+
+  // Fork the upstream cancel stream so each of the 4 in-DO loaders gets
+  // its own single-reader copy. Live cancel propagates to all of them.
+  const childStreams = forkCancelStream(request.cancelStream, request.argsList.length);
+
+  // The 4-loader cap is enforced by `LoaderRunner` (semaphore) — we can
+  // safely Promise.all here; the semaphore queues anything beyond cap.
+  const results = await Promise.all(
+    request.argsList.map(async (args, i) => {
+      try {
+        const value = await runner.runOne({
+          fnSource: request.fnSource,
+          fnHash: request.fnHash,
+          context: request.context,
+          // Inherit the DO's own bindings (the user-Worker env merged into
+          // the DO via wrangler.toml). Library-internal bindings are
+          // filtered by sanitizeBindings inside runOne.
+          bindings: env as unknown as Record<string, unknown>,
+          envelope: {
+            ...request.envelope,
+            cancelTokenId: undefined,
+            mode: 'pool-fn' as const,
+          },
+          args,
+          freshIsolate: request.freshIsolate,
+          cancelStream: childStreams[i],
+        });
+        return { ok: true as const, value };
+      } catch (err) {
+        return errorToFailedResult(err);
+      }
+    }),
+  );
+  return { results };
 }
 
 /**

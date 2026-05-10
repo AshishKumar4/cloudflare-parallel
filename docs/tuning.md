@@ -10,12 +10,12 @@ Knobs you can turn to adapt the runtime to your workload.
 | `branchingFactor`               | `8`            | Tree fan-out width per level. `4` for narrower trees (more depth, less coordinator pressure); `16` for wider (less depth, more leaves).             |
 | `treeThreshold`                 | `256`          | Size at which auto-selector promotes from hybrid to tree. Lower if your fn is CPU-heavy and you want more leaf parallelism sooner.                  |
 | `fanOutCap`                     | `1024`         | Hard ceiling on items per fan-out call. Beyond this, throws `TopologyError`.                                                                         |
-| `cacheKeyStrategy`              | `'auto'`       | `'stable'` if your fn never closes over stale values; `'fresh'` if it closes over per-call config; `'auto'` flips after 60s.                         |
+| `cacheKeyStrategy`              | `'stable'`     | Default reuses one isolate per fn shape — best warmth and no LRU thrash. Use `'fresh'` only when you need a clean V8 heap per call (testing, distrusted code). `'auto'` (60s windows) is opt-in for deployments with a small fixed set of shapes that want periodic refresh. |
 | `timeout`                       | `30_000`       | Wall-clock budget per submit. Set to less than your Worker's `cpuMs` cap.                                                                            |
 | `retries`                       | `0`            | Number of retries on transient errors (DisconnectedError, BackpressureError). Doesn't retry user-thrown errors.                                      |
 | `retryDelay`                    | `100`          | Initial backoff in ms; jittered ±25% on each retry.                                                                                                  |
 | `globalOutbound`                | `undefined`    | `null` to sandbox outbound fetch; `ServiceStub` to proxy via your own Worker.                                                                        |
-| `limits.cpuMs`                  | `30_000`       | Per-isolate CPU cap. workerd-level.                                                                                                                  |
+| `limits.cpuMs`                  | `30_000`       | Per-isolate CPU cap. enforced by the Workers runtime.                                                                                                                  |
 | `limits.subRequests`            | `50`           | Per-isolate subrequest cap.                                                                                                                          |
 
 ## Scheduler-level

@@ -5,10 +5,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { generateWorkerSource } from '../../src/loader/codegen.js';
-import { canonicalizeContext, assertValidContextKey } from '../../src/loader/serialize.js';
-import { Parallel } from '../../src/api/parallel.js';
-import { SerializationError } from '../../src/errors/index.js';
+import { generateWorkerSource } from '../../src/loader/codegen';
+import { canonicalizeContext, assertValidContextKey } from '../../src/loader/serialize';
+import { Parallel } from '../../src/api/parallel';
+import { SerializationError } from '../../src/errors/index';
 
 describe('context-key injection guard', () => {
   it('rejects keys with semicolons', () => {
@@ -85,7 +85,7 @@ describe('Actor mode persists state across submits', () => {
     expect(final).toBe(2);
   });
 
-  it('codegen actor-class mode bakes the fn into the module body (workerd has no eval)', () => {
+  it('codegen actor-class mode bakes the fn into the module body (the runtime has no eval)', () => {
     const src = generateWorkerSource('(state, sql, n) => state.x + n', {
       mode: 'actor-class',
       injectCancelSignal: true,

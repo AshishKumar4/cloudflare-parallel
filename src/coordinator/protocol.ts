@@ -89,7 +89,7 @@ export type {
   CoordinatorEnv,
   CoordinatorFanOutRequest,
   CoordinatorRunRequest,
-} from './coordinator.js';
+} from './coordinator';
 
 export interface RunBatchResult {
   /** Same length as `argsList`. */
@@ -118,6 +118,22 @@ export interface DispatchTreeRequest {
   envelope: DispatchEnvelope;
   /** See RunOneRequest.cancelStream. Forwarded down the tree. */
   cancelStream?: ReadableStream<Uint8Array>;
+  /**
+   * Optional DO placement hint, forwarded down the tree so deeper tiers
+   * place their DOs in the same region as the request's incoming colo.
+   * Best-effort; only honored on first access of each DO.
+   * Reference: https://developers.cloudflare.com/durable-objects/reference/data-location/
+   */
+  locationHint?:
+    | 'wnam'
+    | 'enam'
+    | 'sam'
+    | 'weur'
+    | 'eeur'
+    | 'apac'
+    | 'oc'
+    | 'afr'
+    | 'me';
 }
 
 export interface DispatchTreeResult {

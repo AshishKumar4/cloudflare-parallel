@@ -1,11 +1,11 @@
-import type { JobStore, PersistedJob } from './job-store.js';
+import type { JobStore, PersistedJob } from './job-store';
 
 /**
  * Pure reactive dispatcher core. Holds the ready-set / running-set /
  * round-robin state, kicks the dispatch loop, and delegates execution to a
  * caller-provided `runJob` function.
  *
- * Decoupled from the DO surface so it can be unit-tested without workerd
+ * Decoupled from the DO surface so it can be unit-tested without the live Workers runtime
  * (no SqlStorage, no DurableObject required). `CfpSchedulerDO` is a thin
  * shim that wires `Dispatcher` to its own `ctx.storage` and to a
  * `LoaderRunner`-backed `runJob`.

@@ -9,7 +9,7 @@
  * a local `AbortController` whose signal is exposed to user code as
  * `env.signal`.
  *
- * Why streams: workerd's WorkerCode env is structured-clone (plus
+ * Why streams: the Worker Loader's env shape is structured-clone (plus
  * service-stub passthrough). `ReadableStream` is part of the structured
  * clone graph. Streams traverse RPC boundaries cleanly. We use a stream
  * (rather than a one-shot value) because the load-time env is captured
@@ -19,7 +19,7 @@
  * (the reason string) rides as JSON in the same chunk. The reader treats
  * the very first chunk as "cancel fired" regardless of content.
  *
- * Drop-in for `env.LOADER.abort(id)` (when workerd ships it): the
+ * Drop-in for `env.LOADER.abort(id)` (when the runtime ships that primitive): the
  * coordinator additionally calls `loader.abort(taskId)` after writing the
  * stream byte — the public API is identical.
  */

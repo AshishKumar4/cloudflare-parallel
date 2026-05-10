@@ -3,8 +3,8 @@ import {
   assertNoLibraryInternalBindings,
   sanitizeBindings,
   LIBRARY_INTERNAL_BINDINGS,
-} from '../../src/loader/sandbox.js';
-import { BindingError } from '../../src/errors/index.js';
+} from '../../src/loader/sandbox';
+import { BindingError } from '../../src/errors/index';
 
 describe('library-internal-binding blocklist', () => {
   it('rejects CfpCoordinator', () => {

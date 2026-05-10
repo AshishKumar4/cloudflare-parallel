@@ -1,7 +1,7 @@
 /**
- * Wrangler scaffolding helper. Not run at runtime — used by the codemod
- * (`scripts/migrate-v02-v03.ts`) and the doctor CLI (`config/doctor.ts`)
- * to compute and print wrangler.toml fragments.
+ * Wrangler scaffolding helper. Not run at runtime — used by the
+ * doctor CLI (`config/doctor.ts`) to compute and print wrangler.toml
+ * fragments.
  */
 
 export interface ScaffoldNeeds {
@@ -13,6 +13,13 @@ export interface ScaffoldNeeds {
   needsScheduler: boolean;
   /** Whether to scaffold a Worker Loader binding. */
   needsLoader: boolean;
+  /**
+   * Whether to scaffold the in-process coordinator. Recommended on by
+   * default — adding `CfpInProcessCoordinator` and the
+   * `enable_ctx_exports` compatibility flag drops the small-N (≤ 4)
+   * dispatch floor from a DO RPC hop to an in-process call.
+   */
+  needsInProcess?: boolean;
   /** Optional binding name override (default `LOADER`). */
   loaderName?: string;
   /** Migration tag for the [[migrations]] block. */
@@ -21,6 +28,17 @@ export interface ScaffoldNeeds {
 
 export function emitWranglerFragment(needs: ScaffoldNeeds): string {
   const lines: string[] = [];
+
+  // Compatibility flag — required for `ctx.exports.<WorkerEntrypoint>`.
+  if (needs.needsInProcess !== false) {
+    lines.push(
+      '# Enable `ctx.exports.<WorkerEntrypoint>` loopback bindings.',
+      '# Reference: https://developers.cloudflare.com/workers/configuration/compatibility-flags/#enable-ctxexports',
+      'compatibility_flags = ["enable_ctx_exports"]',
+      '',
+    );
+  }
+
   if (needs.needsLoader) {
     lines.push('# Worker Loader binding (required by all factories)');
     lines.push('[[worker_loaders]]');
@@ -48,13 +66,23 @@ export function emitWranglerFragment(needs: ScaffoldNeeds): string {
     lines.push('');
   }
 
-  lines.push(
-    '# Re-export the library DO classes from your worker entrypoint, e.g.:',
-    '#',
-    '#   export {',
-  );
+  lines.push('# Re-export the library DO classes (and the in-process coordinator)');
+  lines.push('# from your worker entrypoint, e.g.:');
+  lines.push('#');
+  lines.push('#   export {');
   for (const cls of sqliteClasses) lines.push(`#     ${cls},`);
+  if (needs.needsInProcess !== false) {
+    lines.push('#     CfpInProcessCoordinator,');
+  }
   lines.push('#   } from "cloudflare-parallel/durable-objects";');
+  if (needs.needsInProcess !== false) {
+    lines.push('#');
+    lines.push('# Then in your fetch handler, pass the loopback to Parallel.pool:');
+    lines.push('#');
+    lines.push('#   const pool = Parallel.pool(env, {');
+    lines.push('#     inProcess: ctx.exports.CfpInProcessCoordinator,');
+    lines.push('#   });');
+  }
 
   return lines.join('\n');
 }

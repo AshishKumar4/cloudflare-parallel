@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { Parallel } from '../../src/api/parallel.js';
-import { CancelToken } from '../../src/api/cancel.js';
-import type { IPool } from '../../src/api/pool.js';
-import type { IActorHandle } from '../../src/api/actor.js';
-import type { IScheduler } from '../../src/api/scheduler.js';
+import { Parallel } from '../../src/api/parallel';
+import { CancelToken } from '../../src/api/cancel';
+import type { IPool } from '../../src/api/pool';
+import type { IActorHandle } from '../../src/api/actor';
+import type { IScheduler } from '../../src/api/scheduler';
 
 describe('Parallel.testing.poolFake', () => {
   it('returns a canonical IPool (no `as` casts needed)', () => {

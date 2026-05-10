@@ -8,14 +8,14 @@
  * production bundles don't pull in fakes).
  */
 
-import { hashSource, serializeFunction } from '../loader/serialize.js';
-import type { DispatchableFn, UserFn } from './user-fn.js';
-import type { CancelToken } from './cancel.js';
+import { hashSource, serializeFunction } from '../loader/serialize';
+import type { DispatchableFn, UserFn } from './user-fn';
+import type { CancelToken } from './cancel';
 
-import { runFanOut } from './fan-out.js';
-import { wireToError } from './error-decode.js';
-import { errorToFailedResult } from '../coordinator/protocol.js';
-import { rejectIfRpcStub, validateReturn } from '../loader/return-validator.js';
+import { runFanOut } from './fan-out';
+import { wireToError } from './error-decode';
+import { errorToFailedResult } from '../coordinator/protocol';
+import { rejectIfRpcStub, validateReturn } from '../loader/return-validator';
 import type {
   ActorOptions,
   Job,
@@ -34,13 +34,13 @@ import type {
   StreamResult,
   SubmitOptions,
   VMOptions,
-} from './options.js';
-import type { IPool, PipeFn } from './pool.js';
-import type { IActorHandle } from './actor.js';
-import type { IScheduler } from './scheduler.js';
-import type { LoaderOnlyPool } from './loader-only-pool.js';
-import type { SubmitCodePolicy } from './submit-code-handler.js';
-import { deferred, type Deferred } from '../internal/deferred.js';
+} from './options';
+import type { IPool, PipeFn } from './pool';
+import type { IActorHandle } from './actor';
+import type { IScheduler } from './scheduler';
+import type { LoaderOnlyPool } from './loader-only-pool';
+import type { SubmitCodePolicy } from './submit-code-handler';
+import { deferred, type Deferred } from '../internal/deferred';
 
 interface FakeOpts<B> {
   bindings?: B;

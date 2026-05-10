@@ -1,4 +1,4 @@
-import type { JobStatus, RetryPolicy } from '../api/options.js';
+import type { JobStatus, RetryPolicy } from '../api/options';
 
 export interface PersistedJob {
   id: string;

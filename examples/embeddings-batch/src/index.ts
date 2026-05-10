@@ -6,7 +6,7 @@
  * shape of an embedding pass). Then we compute cosine similarity to a
  * query vector and return the top-K most similar.
  *
- * The `embed` step is the CPU-heavy part: ~1-3ms per doc on workerd.
+ * The `embed` step is the CPU-heavy part: ~1-3ms per doc on the Workers runtime.
  * Single-threaded JS would serialize all N docs behind the event loop.
  * `pool.map` runs them across N parallel V8 isolates.
  *

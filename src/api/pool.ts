@@ -1,6 +1,7 @@
-import type { ParallelError } from '../errors/index.js';
-import { BindingError, MissingBindingError } from '../errors/index.js';
+import type { ParallelError } from '../errors/index';
+import { BindingError, MissingBindingError } from '../errors/index';
 import type {
+  InProcessCoordinatorBinding,
   MapOptions,
   OnErrorStrategy,
   PmapOptions,
@@ -11,31 +12,41 @@ import type {
   StreamOptions,
   StreamResult,
   SubmitOptions,
-} from './options.js';
-import type { CancelToken } from './cancel.js';
-import { hashSource, serializeFunction } from '../loader/serialize.js';
-import { runFanOut } from './fan-out.js';
-import { splitSubmitOptions } from './loader-only-pool.js';
-import type { UserFn } from './user-fn.js';
+} from './options';
+import type { CancelToken } from './cancel';
+import { hashSource, serializeFunction } from '../loader/serialize';
+import { runFanOut } from './fan-out';
+import { splitSubmitOptions } from './loader-only-pool';
+import type { UserFn } from './user-fn';
 import type {
   CoordinatorFanOutRequest,
   CoordinatorRunRequest,
   DispatchEnvelope,
   RunOneRequest,
   RunOneResult,
-} from '../coordinator/protocol.js';
-import { workerOptionsToWire } from '../coordinator/internal.js';
-import { dispatchWithResilience } from '../transport/rpc-client.js';
-import { buildEnvelope } from '../transport/deadline-prop.js';
-import { createCancelStream } from '../transport/cancel-stream.js';
-import { deferred, type Deferred } from '../internal/deferred.js';
-import { emitObservabilityEvent } from '../observability/index.js';
-import { assertNoLibraryInternalBindings } from '../loader/sandbox.js';
-import { wireToError } from './error-decode.js';
-import { submitCodeHandler, type SubmitCodePolicy } from './submit-code-handler.js';
-import { pickBindings } from './bindings.js';
+} from '../coordinator/protocol';
+import {
+  locationHintForColo,
+  workerOptionsToWire,
+  type LocationHint,
+} from '../coordinator/internal';
+import { dispatchWithResilience } from '../transport/rpc-client';
+import { buildEnvelope } from '../transport/deadline-prop';
+import { createCancelStream } from '../transport/cancel-stream';
+import { deferred, type Deferred } from '../internal/deferred';
+import { emitObservabilityEvent } from '../observability/index';
+import { assertNoLibraryInternalBindings } from '../loader/sandbox';
+import { wireToError } from './error-decode';
+import { submitCodeHandler, type SubmitCodePolicy } from './submit-code-handler';
+import { pickBindings } from './bindings';
 
 const DEFAULT_COORDINATOR_NAME = 'cfp:default';
+
+// Local minimal shape — `@cloudflare/workers-types` declares this in newer
+// versions but we don't want to hard-pin to one. Runtime accepts the shape.
+interface DurableObjectNamespaceGetDurableObjectOptions {
+  locationHint?: LocationHint;
+}
 
 interface FanOutResponse {
   results: RunOneResult[];
@@ -67,6 +78,15 @@ interface DurableObjectStubLike {
 }
 
 /**
+ * Loopback target for small-N submits. Same call shape as the DO
+ * coordinator, but the runtime keeps the call inside the same Worker
+ * process — no DO routing, no Cap'n Proto over the network. Honored when
+ * the user supplies `inProcess: ctx.exports.CfpInProcessCoordinator` via
+ * {@link PoolOptions}.
+ */
+const IN_PROCESS_THRESHOLD = 4;
+
+/**
  * Public Pool interface — implemented by both {@link Pool} (the production
  * class) and the testing fake (`Parallel.testing.poolFake`). Library users
  * who want to write code against either backend can type their reference
@@ -87,7 +107,7 @@ export interface IPool<
    * Run a function from its source string. Skips `Function.prototype.toString()`
    * in the parent Worker — used by the HTTP submit-code surface where the
    * user posted the source directly. The loader is the platform-sanctioned
-   * path for dynamic code; `eval` is disabled in workerd by default.
+   * path for dynamic code; `eval` is disabled in the Workers runtime by default.
    */
   submitSource<R>(fnSource: string, args: unknown[], opts?: SubmitOptions): Promise<R>;
   map<T, R>(
@@ -204,6 +224,14 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
   /** Resolved when `#inFlight` next reaches 0; reset on next submit. */
   #drainBarrier: Deferred<void> | undefined;
 
+  /**
+   * Resolved `locationHint` for this Pool. Either set explicitly via
+   * `opts.locationHint`, derived from `opts.requestColo`, or `undefined`
+   * (in which case the runtime picks placement on first DO access).
+   */
+  readonly #locationHint: LocationHint | undefined;
+  readonly #inProcess: InProcessCoordinatorBinding | undefined;
+
   constructor(env: PoolEnv, opts: PoolOptions<B, C> = {}) {
     if (!env.LOADER || typeof env.LOADER.get !== 'function') {
       throw new BindingError(
@@ -223,14 +251,64 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
     this.#env = env;
     this.#opts = opts;
     this.#coordinatorName = opts.coordinatorId ?? DEFAULT_COORDINATOR_NAME;
+    this.#locationHint = opts.locationHint ?? locationHintForColo(opts.requestColo);
+    this.#inProcess = opts.inProcess;
   }
 
   // ---- internal helpers ---------------------------------------------
 
   #stub(): CoordinatorStub & DurableObjectStubLike {
     const ns = this.#env.CfpCoordinator!;
-    return ns.get(ns.idFromName(this.#coordinatorName)) as unknown as CoordinatorStub &
-      DurableObjectStubLike;
+    // The DO Coordinator is a sticky, request-spanning anchor for the
+    // tree/hybrid topology. `locationHint` is best-effort and only honored
+    // on first access — the cost of the cast through unknown is documented
+    // in `coordinator/internal.ts:getStub`.
+    const opts = this.#locationHint
+      ? ({ locationHint: this.#locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions)
+      : undefined;
+    const id = ns.idFromName(this.#coordinatorName);
+    const stub = opts
+      ? (ns as DurableObjectNamespace & {
+          get(
+            id: DurableObjectId,
+            opts?: DurableObjectNamespaceGetDurableObjectOptions,
+          ): DurableObjectStub;
+        }).get(id, opts)
+      : ns.get(id);
+    return stub as unknown as CoordinatorStub & DurableObjectStubLike;
+  }
+
+  /**
+   * Pick the dispatch target for a single-shot submit. When the user has
+   * wired up `inProcess: ctx.exports.CfpInProcessCoordinator`, all
+   * `submit(...)` calls and `map`-style fan-outs of size ≤ 4 route through
+   * the loopback (no DO RPC). Otherwise they route through the Coordinator
+   * DO stub.
+   */
+  #runOneTarget(): DurableObjectStubLike {
+    if (this.#inProcess) {
+      return this.#inProcess as unknown as DurableObjectStubLike;
+    }
+    return this.#stub();
+  }
+
+  /**
+   * Pick the dispatch target for a fan-out of `size` items. Same logic as
+   * {@link Pool.#runOneTarget}, but the in-process path is only valid when
+   * the pool has not pinned a `topology` that requires the DO tree (e.g.
+   * `'hybrid'` / `'tree'` always need the Coordinator DO).
+   */
+  #runManyTarget(size: number): DurableObjectStubLike {
+    const pinned = this.#opts.topology;
+    const canLoopback =
+      this.#inProcess !== undefined &&
+      size > 0 &&
+      size <= IN_PROCESS_THRESHOLD &&
+      (pinned === undefined || pinned === 'auto' || pinned === 'in-do');
+    if (canLoopback) {
+      return this.#inProcess as unknown as DurableObjectStubLike;
+    }
+    return this.#stub();
   }
 
   /**
@@ -310,7 +388,7 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
   /**
    * Dispatch a pre-serialized function source. Used by `submitCodeHandler`
    * (HTTP submit-code) to avoid round-tripping through `eval` in the
-   * parent Worker — workerd disables `eval` by default. The source is
+   * parent Worker — the Workers runtime disables `eval` by default. The source is
    * passed straight to the loader, which is the platform-sanctioned path
    * for dynamic code.
    *
@@ -366,18 +444,21 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
       }
     }
 
-    const stub = this.#stub();
+    // Single-shot submits go through the in-process loopback when wired up
+    // (skipping the DO hop). Fan-outs use a different target picker —
+    // see `#runManyTarget`.
+    const target = this.#runOneTarget();
     let errorEmitted = false;
     this.#inFlightInc(1);
     try {
       const result = await dispatchWithResilience<RunOneResult>(
         () =>
-          stub.runOne({
+          target.runOne({
             fnSource,
             fnHash,
             args,
             context: this.#mergeContext(opts?.context),
-            cacheKeyStrategy: this.#opts.cacheKeyStrategy ?? 'auto',
+            cacheKeyStrategy: this.#opts.cacheKeyStrategy ?? 'stable',
             workerOptions: workerOptionsToWire({
               compatibilityDate: this.#opts.workerOptions?.compatibilityDate,
               compatibilityFlags: this.#opts.workerOptions?.compatibilityFlags,
@@ -456,7 +537,7 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
         this.#cancelled++;
         // The caller-side cancel surfaced here, but the loaded isolate may
         // still be running until its cpuMs / wall-clock budget elapses
-        // (workerd has no `loader.abort(id)`; AbortController short-circuits
+        // (the Worker Loader API has no `abort(id)` primitive yet; AbortController short-circuits
         // user `await`s but cannot terminate sync loops). Surface this as
         // `taskOrphan` so users can observe the asymmetry in their metrics.
         emitObservabilityEvent(obs, {
@@ -936,18 +1017,20 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
       }
     }
 
-    const stub = this.#stub();
+    // Pick dispatch target. Small-N (≤4) routes through the in-process
+    // loopback when wired up; larger fan-outs use the Coordinator DO.
+    const target = this.#runManyTarget(argsList.length);
     this.#inFlightInc(argsList.length);
     let result: FanOutResponse;
     try {
       result = await dispatchWithResilience(
         () =>
-          stub.runMany({
+          target.runMany({
             fnSource,
             fnHash,
             argsList,
             context: this.#mergeContext(opts.perCall?.context),
-            cacheKeyStrategy: this.#opts.cacheKeyStrategy ?? 'auto',
+            cacheKeyStrategy: this.#opts.cacheKeyStrategy ?? 'stable',
             workerOptions: workerOptionsToWire({
               compatibilityDate: this.#opts.workerOptions?.compatibilityDate,
               compatibilityFlags: this.#opts.workerOptions?.compatibilityFlags,
@@ -962,6 +1045,7 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
             freshIsolate: opts.perCall?.freshIsolate,
             selector: this.#selector(),
             cancelStream: cancelWriter?.stream,
+            locationHint: this.#locationHint,
           }),
         {
           timeout: opts.perCall?.timeout ?? this.#opts.timeout,

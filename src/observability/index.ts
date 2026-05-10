@@ -15,7 +15,7 @@ import type {
   TopologyDecisionEvent,
   LruEvictionEvent,
   SchedulerEvent,
-} from '../api/options.js';
+} from '../api/options';
 
 export type ObservabilityEvent =
   | { kind: 'taskStart'; payload: TaskStartEvent }

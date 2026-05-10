@@ -6,7 +6,7 @@ import {
   defaultCapFor,
   getMeasuredCap,
   isolateSemaphore,
-} from '../../src/loader/loader-budget.js';
+} from '../../src/loader/loader-budget';
 
 afterEach(() => {
   _resetIsolateSemaphoreForTesting();

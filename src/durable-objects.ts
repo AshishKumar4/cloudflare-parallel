@@ -1,14 +1,38 @@
 /**
- * Re-export the library's Durable Object classes for users to register in
- * their Worker entrypoint:
+ * Re-export the library's Durable Object classes (and the in-process
+ * coordinator WorkerEntrypoint) for users to register in their Worker
+ * entrypoint:
  *
- *   import { CfpCoordinator, CfpWorkerDO, CfpSubCoord, CfpSchedulerDO }
- *     from 'cloudflare-parallel/durable-objects';
- *   export { CfpCoordinator, CfpWorkerDO, CfpSubCoord, CfpSchedulerDO };
+ *     import {
+ *       CfpCoordinator,
+ *       CfpWorkerDO,
+ *       CfpSubCoord,
+ *       CfpSchedulerDO,
+ *       CfpInProcessCoordinator,
+ *     } from 'cloudflare-parallel/durable-objects';
+ *     export {
+ *       CfpCoordinator,
+ *       CfpWorkerDO,
+ *       CfpSubCoord,
+ *       CfpSchedulerDO,
+ *       CfpInProcessCoordinator,
+ *     };
  *
- * The matching `wrangler.toml` bindings live in MIGRATION.md (or use
- * `cloudflare-parallel doctor` to scaffold them).
+ * `CfpInProcessCoordinator` is a `WorkerEntrypoint` (not a Durable
+ * Object) — re-exporting it makes it available as a `ctx.exports` loopback
+ * binding for small-N submits, dropping dispatch overhead from tens of
+ * milliseconds (DO RPC) to a couple of milliseconds (in-process).
+ *
+ * The matching `wrangler.toml` bindings are documented in the project
+ * README; run `npx cloudflare-parallel doctor` to scaffold them in an
+ * existing Worker.
  */
 
-export { CfpCoordinator, CfpWorkerDO, CfpWorkerDOEntry, CfpSubCoord } from './coordinator/index.js';
-export { CfpSchedulerDO } from './scheduler/index.js';
+export {
+  CfpCoordinator,
+  CfpWorkerDO,
+  CfpWorkerDOEntry,
+  CfpSubCoord,
+  CfpInProcessCoordinator,
+} from './coordinator/index';
+export { CfpSchedulerDO } from './scheduler/index';

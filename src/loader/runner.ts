@@ -1,11 +1,11 @@
-import type { RpcEnvelope, WorkerCode, WorkerLoader } from '../types.js';
-import { buildWorkerCode, type WorkerCodeOptions } from './codegen.js';
-import { buildCacheKey, type CacheKeyStrategy } from './cache-key.js';
-import { isolateSemaphore, type CallSiteKind } from './loader-budget.js';
-import { sanitizeBindings } from './sandbox.js';
-import { canonicalizeContext, hashSource } from './serialize.js';
-import { validateReturn, rejectIfRpcStub } from './return-validator.js';
-import { marshalError } from '../transport/error-marshal.js';
+import type { RpcEnvelope, WorkerCode, WorkerLoader } from '../types';
+import { buildWorkerCode, type WorkerCodeOptions } from './codegen';
+import { buildCacheKey, type CacheKeyStrategy } from './cache-key';
+import { isolateSemaphore, type CallSiteKind } from './loader-budget';
+import { sanitizeBindings } from './sandbox';
+import { canonicalizeContext, hashSource } from './serialize';
+import { validateReturn, rejectIfRpcStub } from './return-validator';
+import { marshalError } from '../transport/error-marshal';
 
 
 export interface LoaderRunnerOptions {
@@ -94,7 +94,7 @@ export class LoaderRunner {
       const workerCode: () => Promise<WorkerCode> = async () =>
         buildWorkerCode({
           // Bake the fn into the module body for both pool-fn and
-          // actor-class modes — workerd disallows `eval` inside loaded
+          // actor-class modes — the Workers runtime disallows `eval` inside loaded
           // isolates by default, so we cannot eval the source at submit
           // time. The cache key already varies by fnSource hash, so each
           // distinct fn submitted to the same actor instantiates its own

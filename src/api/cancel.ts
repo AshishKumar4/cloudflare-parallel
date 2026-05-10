@@ -1,4 +1,4 @@
-import { CancelledError } from '../errors/index.js';
+import { CancelledError } from '../errors/index';
 
 /**
  * Cancellation primitive for cloudflare-parallel.
@@ -181,7 +181,7 @@ export class CancelToken implements AsyncDisposable {
 }
 
 /**
- * Extract a string `reason` from an `AbortSignal`. Browsers and workerd
+ * Extract a string `reason` from an `AbortSignal`. Browsers and the Workers runtime
  * usually surface `signal.reason` as either a `DOMException`/`Error` or the
  * value passed to `controller.abort(...)`.
  */

@@ -13,7 +13,7 @@
 const encoder = new TextEncoder();
 
 /**
- * Constant-time string equality. Prefers workerd's native
+ * Constant-time string equality. Prefers the Workers runtime's native
  * `crypto.subtle.timingSafeEqual(ArrayBuffer)` when available; falls
  * back to a hand-rolled XOR-OR loop on environments that don't ship it.
  *
@@ -24,7 +24,7 @@ const encoder = new TextEncoder();
  */
 function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
-  // Prefer the platform primitive when present (workerd ships it).
+  // Prefer the platform primitive when present (when the runtime exposes it).
   const subtle = (globalThis as { crypto?: { subtle?: { timingSafeEqual?: unknown } } }).crypto
     ?.subtle;
   const tse = subtle as

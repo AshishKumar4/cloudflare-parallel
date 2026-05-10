@@ -6,7 +6,7 @@
     "dev": "wrangler dev --ip 0.0.0.0 --port 8787"
   },
   "dependencies": {
-    "cloudflare-parallel": "file:../../../"
+    "cloudflare-parallel": "file:./cloudflare-parallel-pkg.tgz"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240512.0",

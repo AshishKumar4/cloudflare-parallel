@@ -6,7 +6,8 @@
  * directly; hybrid dispatches one RPC per leaf entry; tree recursively
  * dispatches sliced plans to sub-coordinators.
  *
- * Goldens for these shapes live in tests/unit/selector.test.ts.
+ * Goldens for these shapes live in tests/unit/selector.test.ts and
+ * tests/unit/topology/plan.test.ts.
  */
 
 export type TopologyName = 'loader-only' | 'in-do' | 'hybrid' | 'tree';
@@ -50,20 +51,81 @@ export type TopologyPlan = InDoPlan | HybridPlan | TreePlan | LoaderOnlyPlan;
 // ---- balanced-fill leaf-shape distribution -----------------------------
 
 /**
- * Distribute `size` jobs across `n` slots with no slot exceeding `maxPerSlot`.
+ * Distribute `size` jobs across `n` slots as evenly as possible.
  *
- * Algorithm: fill slots 4-at-a-time from index 0; the last slot gets the
- * remainder. This matches DESIGN §4.2 worked examples:
- *   size=17, n=5  -> [4,4,4,4,1]
- *   size=20, n=5  -> [4,4,4,4,4]
- *   size=10, n=3  -> [4,3,3]
- *   size=128,n=32 -> 32×[4]
+ * Each slot receives `floor(size/n)` items; the first `size mod n` slots
+ * receive one extra. Used by the tree topology to split a workload across
+ * the branching factor — every child gets a roughly equal share so the
+ * fan-out is real (not a chain).
+ *
+ *   balancedFill(512, 4)  -> [128, 128, 128, 128]
+ *   balancedFill(128, 8)  -> [16, 16, 16, 16, 16, 16, 16, 16]
+ *   balancedFill(17, 5)   -> [4, 4, 3, 3, 3]
+ *   balancedFill(10, 3)   -> [4, 3, 3]
+ *   balancedFill(0, 4)    -> [0, 0, 0, 0]
+ *
+ * The optional third argument is preserved for backward compatibility with
+ * earlier callers that passed a per-slot cap. When supplied, slots are
+ * capped at `maxPerSlot` and any overflow throws — i.e. the caller is
+ * stating "I expect each slot to receive at most this many". This matches
+ * the v0.3 hybrid-leaf usage where slots are 4-loader DOs.
+ *
+ * Note: callers that want the old "fill 4-at-a-time, last slot gets the
+ * remainder" hybrid leaf shape should use {@link fillCapped} instead. The
+ * two distributions are intentionally distinct — see DESIGN §4.2 and
+ * §4.3.
  */
-export function balancedFill(size: number, n: number, maxPerSlot = 4): number[] {
+export function balancedFill(size: number, n: number, maxPerSlot?: number): number[] {
+  if (n <= 0) return [];
+  if (size <= 0) return new Array(n).fill(0);
+  if (maxPerSlot !== undefined && n * maxPerSlot < size) {
+    throw new RangeError(
+      `balancedFill: n=${n} slots × maxPerSlot=${maxPerSlot} < size=${size}`,
+    );
+  }
+  const out = new Array(n).fill(0) as number[];
+  const base = Math.floor(size / n);
+  const extras = size % n;
+  for (let i = 0; i < n; i++) {
+    out[i] = base + (i < extras ? 1 : 0);
+  }
+  // The cap is a sanity check, not a constraint: with `n * maxPerSlot >=
+  // size` the per-slot value is at most `ceil(size/n)`, which is bounded
+  // by `maxPerSlot` whenever `maxPerSlot >= ceil(size/n)`. Throw on any
+  // overflow so misuse surfaces immediately.
+  if (maxPerSlot !== undefined) {
+    for (const v of out) {
+      if (v > maxPerSlot) {
+        throw new RangeError(
+          `balancedFill: slot value ${v} exceeds maxPerSlot=${maxPerSlot}`,
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Cap-first distribution. Fill `maxPerSlot`-at-a-time from index 0; the
+ * last non-zero slot holds the remainder. Used by the hybrid topology to
+ * shape per-leaf loader counts — each leaf DO is a 4-loader bucket, and
+ * the leaf shape tracks "how many loaders per leaf DO".
+ *
+ *   fillCapped(17, 5, 4)  -> [4, 4, 4, 4, 1]
+ *   fillCapped(20, 5, 4)  -> [4, 4, 4, 4, 4]
+ *   fillCapped(10, 3, 4)  -> [4, 4, 2]
+ *   fillCapped(128, 32, 4) -> 32 × [4]
+ *
+ * Throws `RangeError` if `n * maxPerSlot < size` (caller's distribution
+ * is impossible at the requested cap).
+ */
+export function fillCapped(size: number, n: number, maxPerSlot: number): number[] {
   if (n <= 0) return [];
   if (size <= 0) return new Array(n).fill(0);
   if (n * maxPerSlot < size) {
-    throw new RangeError(`balancedFill: n=${n} slots × maxPerSlot=${maxPerSlot} < size=${size}`);
+    throw new RangeError(
+      `fillCapped: n=${n} slots × maxPerSlot=${maxPerSlot} < size=${size}`,
+    );
   }
   const out = new Array(n).fill(0) as number[];
   let remaining = size;

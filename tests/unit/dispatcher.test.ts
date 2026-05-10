@@ -4,9 +4,9 @@ import {
   DEFAULT_DISPATCHER_CONFIG,
   type DispatcherConfig,
   type RunJobFn,
-} from '../../src/scheduler/dispatcher.js';
-import type { JobStore, PersistedJob } from '../../src/scheduler/job-store.js';
-import { MemoryJobStore } from '../bench/mem-job-store.js';
+} from '../../src/scheduler/dispatcher';
+import type { JobStore, PersistedJob } from '../../src/scheduler/job-store';
+import { MemoryJobStore } from '../bench/mem-job-store';
 
 function makeJob(overrides: Partial<PersistedJob>): PersistedJob {
   return {

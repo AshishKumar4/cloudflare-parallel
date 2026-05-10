@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { emitObservabilityEvent } from '../../src/observability/index.js';
+import { emitObservabilityEvent } from '../../src/observability/index';
 import type {
   AnalyticsEngineDataset,
   ObservabilityOptions,
-} from '../../src/api/options.js';
+} from '../../src/api/options';
 
 function makeAE(): {
   ds: AnalyticsEngineDataset;

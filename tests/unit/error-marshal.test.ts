@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { isRetryable, marshalError } from '../../src/transport/error-marshal.js';
+import { isRetryable, marshalError } from '../../src/transport/error-marshal';
 import {
   BackpressureError,
   BillingLimitError,
@@ -7,7 +7,7 @@ import {
   ExecutionError,
   OutOfMemoryError,
   SerializationError,
-} from '../../src/errors/index.js';
+} from '../../src/errors/index';
 
 describe('marshalError', () => {
   it('maps "Too many concurrent dynamic workers" → BackpressureError', () => {

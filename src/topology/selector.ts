@@ -1,11 +1,12 @@
-import { TopologyError } from '../errors/index.js';
+import { TopologyError } from '../errors/index';
 import {
   type HybridPlan,
   type InDoPlan,
   type TopologyPlan,
   type TreePlan,
   balancedFill,
-} from './plan.js';
+  fillCapped,
+} from './plan';
 
 /** Pool topologies. `loader-only` is intentionally NOT in this union — it lives behind `Parallel.loaderOnly()`. */
 export type Topology = 'auto' | 'in-do' | 'hybrid' | 'tree';
@@ -105,7 +106,11 @@ function buildHybridPlan(size: number, maxFanOut: number): HybridPlan {
   // tree topology — see buildTreePlan.)
   void maxFanOut;
   const n = Math.ceil(size / PER_DO_LOADER_CAP);
-  const leafShape = balancedFill(size, n, PER_DO_LOADER_CAP);
+  // Hybrid leaf shape is cap-first: each leaf DO is a 4-loader bucket, so
+  // we fill 4-at-a-time and the last leaf holds the remainder. This is
+  // distinct from the tree's branch distribution (see buildTreePlan) which
+  // uses `balancedFill` for an even split.
+  const leafShape = fillCapped(size, n, PER_DO_LOADER_CAP);
   return { topology: 'hybrid', size, leafShape };
 }
 
@@ -125,9 +130,13 @@ function buildTreePlan(
   const F = branchingFactor;
   const K = forcedDepth ?? Math.max(1, Math.ceil(Math.log(size / PER_DO_LOADER_CAP) / Math.log(F)));
 
-  // Distribute `size` across F children. No per-slot cap above the hybrid
-  // leaf — a child can hold up to `size` (with one branch full, others empty).
-  const childSizes = balancedFill(size, F, size);
+  // Distribute `size` evenly across F children. balancedFill gives the
+  // tree-distribution semantics (floor(size/F) base + 1-extra to the
+  // first `size % F` slots), so e.g. balancedFill(512, 4) = [128,128,128,128].
+  // The earlier (broken) call passed `maxPerSlot = size`, which collapsed
+  // the tree to a chain because the cap-first algorithm filled slot 0
+  // entirely. Bug surfaced in third-party review.
+  const childSizes = balancedFill(size, F);
   const usedChildren = childSizes.filter((s) => s > 0);
 
   // Hybrid-leaf threshold per child: maxFanOut × 4 (the hybrid ceiling).

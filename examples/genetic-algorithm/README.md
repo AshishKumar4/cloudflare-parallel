@@ -11,7 +11,7 @@ evaluation is:
 
 1. Compute total tour distance — cheap.
 2. **2-opt local search refinement** — `O(n²)` per evaluation, ~5-15 ms
-   on workerd at 50 cities.
+   on the Workers runtime at 50 cities.
 
 A population of 256 over 30 generations is 7,680 evaluations. Single
 threaded JS would serialize them all behind the event loop. `pool.map`

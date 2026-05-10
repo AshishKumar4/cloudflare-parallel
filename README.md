@@ -79,6 +79,10 @@ bun add cloudflare-parallel
 name = "my-worker"
 main = "src/index.ts"
 compatibility_date = "2026-01-20"
+# Enables `ctx.exports.<WorkerEntrypoint>` loopback bindings — used by the
+# in-process coordinator below to skip the DO hop on small fan-outs.
+# https://developers.cloudflare.com/workers/configuration/compatibility-flags/#enable-ctxexports
+compatibility_flags = ["enable_ctx_exports"]
 
 [[worker_loaders]]
 binding = "LOADER"
@@ -103,8 +107,13 @@ new_sqlite_classes = ["CfpCoordinator", "CfpWorkerDO", "CfpSubCoord"]
 `src/index.ts`:
 
 ```ts
-import { Parallel, pickBindings, type WorkerLoader } from 'cloudflare-parallel';
-export { CfpCoordinator, CfpWorkerDO, CfpSubCoord } from 'cloudflare-parallel/durable-objects';
+import { Parallel, type WorkerLoader } from 'cloudflare-parallel';
+export {
+  CfpCoordinator,
+  CfpWorkerDO,
+  CfpSubCoord,
+  CfpInProcessCoordinator,
+} from 'cloudflare-parallel/durable-objects';
 
 interface Env {
   LOADER: WorkerLoader;
@@ -114,8 +123,17 @@ interface Env {
 }
 
 export default {
-  async fetch(_req: Request, env: Env) {
-    const pool = Parallel.pool(env);
+  async fetch(req: Request, env: Env, ctx: ExecutionContext) {
+    const pool = Parallel.pool(env, {
+      // Skip the DO hop for small fan-outs (size ≤ 4) — same-process
+      // dispatch via the auto-generated `ctx.exports` loopback.
+      // https://developers.cloudflare.com/workers/runtime-apis/context/
+      inProcess: ctx.exports.CfpInProcessCoordinator,
+      // Colocate freshly-created leaf DOs with the request's incoming
+      // colo. Best-effort placement hint, honored on first DO access only.
+      // https://developers.cloudflare.com/durable-objects/reference/data-location/
+      requestColo: req.cf?.colo as string | undefined,
+    });
     const sums = await pool.map((n: number) => n * n, [1, 2, 3, 4, 5]);
     return Response.json(sums);
   },
@@ -359,6 +377,29 @@ size > 256   tree         coordinator → sub-coords → leaves; depth K = ⌈lo
 
 Read [`DESIGN.md`](DESIGN.md) §4 for the math, ADRs, and the empirical caps that drive the selector.
 
+## Performance
+
+Three knobs cooperate to keep dispatch cheap end-to-end:
+
+**1. In-process coordinator for small fan-outs.** Pass `inProcess: ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` and any fan-out of size ≤ 4. The loopback stays inside the same Worker process — no inter-DO RPC, no cross-region routing — so per-call dispatch drops from tens of milliseconds to ~1–3 ms. Larger fan-outs still flow through the Coordinator DO (which composes 4N parallelism across leaf DOs). [`ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/).
+
+**2. Promise pipelining at the leaf tier.** Fan-out to leaf DOs uses `stub.openSession().runBatch(...)` — the `runBatch` call is invoked on a not-yet-resolved session promise, and the runtime's RPC pipeline (Cap'n Proto promise pipelining) collapses both calls into a single round-trip per leaf. [Workers RPC reference](https://developers.cloudflare.com/workers/runtime-apis/rpc/).
+
+**3. `locationHint` colocation.** Pass `requestColo: req.cf?.colo` (or `locationHint: 'wnam'` directly) so freshly-created leaf DOs land in the same region as the request's incoming colo. Best-effort placement, honored only on first access of each DO. [Data location reference](https://developers.cloudflare.com/durable-objects/reference/data-location/).
+
+```ts
+const pool = Parallel.pool(env, {
+  inProcess: ctx.exports.CfpInProcessCoordinator,    // small-N skips DO hop
+  requestColo: req.cf?.colo as string | undefined,   // colocate leaf DOs
+});
+```
+
+The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed test worker with separate cold-run / warm-run reporting and equal warmup for both paths. Each hero workload (Mandelbrot tiles, Monte Carlo π, Bitcoin-style PoW, genetic algorithm) targets ~500–800 ms of CPU per task so the per-call dispatch floor is well-amortized.
+
+### Cache key strategy
+
+Every factory defaults `cacheKeyStrategy: 'stable'` — one isolate per fn shape, long-lived warmth, no eviction storms. `'fresh'` forces a clean V8 heap per submission (testing, sandboxing distrusted code per-call). `'auto'` (60-second windows) is opt-in for the small-fixed-set-of-shapes / want-periodic-refresh case. With high fn-shape diversity, `'auto'` thrashes the per-owner LRU; the default was switched to `'stable'` after a third-party review surfaced the eviction storm. See [`docs/tuning.md`](docs/tuning.md).
+
 ## Examples
 
 | Path | What it shows |
@@ -373,12 +414,11 @@ Read [`DESIGN.md`](DESIGN.md) §4 for the math, ADRs, and the empirical caps tha
 ## Documentation
 
 - [`DESIGN.md`](DESIGN.md) — architectural spec, ADRs, threat model
-- [`MIGRATION.md`](MIGRATION.md) — v0.2 → v0.3 migration guide
 - [`docs/architecture.md`](docs/architecture.md) — substrate, topology selection, dispatch pipeline
 - [`docs/security.md`](docs/security.md) — submit-code threat model and mitigations
 - [`docs/tuning.md`](docs/tuning.md) — every knob, default, and when to change it
 - [`docs/troubleshooting.md`](docs/troubleshooting.md) — error decode tree and common gotchas
-- [`docs/cf-internals.md`](docs/cf-internals.md) — Cloudflare Workers internals deep-dive (for contributors)
+
 - [`docs/when-to-use.md`](docs/when-to-use.md) — when to reach for this library vs `Promise.all`
 
 ## Live demo
@@ -395,10 +435,6 @@ The substrate test worker is also live at [`cloudflare-parallel-prod-tests.ashis
 | `compatibility_date` | ≥ 2025-09-01 |
 | Worker Loader binding | required (private beta) |
 | Bun | recommended for development |
-
-## From v0.2
-
-The migration codemod handles renames (`__cfp_*` → `Cfp*`, factory split, etc.) but the v0.2 ergonomics carry over 1:1: closure-free user fns, `bindings:` / `context:` passthrough, per-call option overrides, `cancel:` token. See [`MIGRATION.md`](MIGRATION.md) for the diff.
 
 ## Contributing
 

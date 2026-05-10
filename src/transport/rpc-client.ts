@@ -4,9 +4,9 @@ import {
   DeadlineExceededError,
   RetryExhaustedError,
   TimeoutError,
-} from '../errors/index.js';
-import type { CancelToken } from '../api/cancel.js';
-import { isRetryable, marshalError } from './error-marshal.js';
+} from '../errors/index';
+import type { CancelToken } from '../api/cancel';
+import { isRetryable, marshalError } from './error-marshal';
 
 export interface DispatchOptions {
   /** Wall-clock timeout in ms (relative). Independent of deadline. */

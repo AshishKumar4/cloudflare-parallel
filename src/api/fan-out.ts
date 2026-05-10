@@ -1,6 +1,6 @@
-import { AggregateExecutionError, CancelledError, ParallelError } from '../errors/index.js';
-import type { CancelToken } from './cancel.js';
-import type { OnErrorStrategy } from './options.js';
+import { AggregateExecutionError, CancelledError, ParallelError } from '../errors/index';
+import type { CancelToken } from './cancel';
+import type { OnErrorStrategy } from './options';
 
 export type FanOutMode = 'map' | 'scatter';
 

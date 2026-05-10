@@ -6,41 +6,41 @@
  * For the library DO classes, import from `cloudflare-parallel/durable-objects`.
  */
 
-export { Parallel } from './api/parallel.js';
-export { Pool } from './api/pool.js';
-export type { IPool, PipeFn } from './api/pool.js';
-export { LoaderOnlyPoolImpl as LoaderOnlyPool } from './api/loader-only-pool.js';
-export type { LoaderOnlyPool as LoaderOnlyPoolType } from './api/loader-only-pool.js';
-export { ActorHandle } from './api/actor.js';
-export type { IActorHandle } from './api/actor.js';
-export { Scheduler } from './api/scheduler.js';
-export type { IScheduler } from './api/scheduler.js';
-export { VM, vm } from './api/vm.js';
-export { submitCodeHandler } from './api/submit-code-handler.js';
-export type { SubmitCodePolicy } from './api/submit-code-handler.js';
-export { bearerAuth, hmacAuth } from './api/auth.js';
-export type { HmacAuthOptions } from './api/auth.js';
-export { pickBindings } from './api/bindings.js';
+export { Parallel } from './api/parallel';
+export { Pool } from './api/pool';
+export type { IPool, PipeFn } from './api/pool';
+export { LoaderOnlyPoolImpl as LoaderOnlyPool } from './api/loader-only-pool';
+export type { LoaderOnlyPool as LoaderOnlyPoolType } from './api/loader-only-pool';
+export { ActorHandle } from './api/actor';
+export type { IActorHandle } from './api/actor';
+export { Scheduler } from './api/scheduler';
+export type { IScheduler } from './api/scheduler';
+export { VM, vm } from './api/vm';
+export { submitCodeHandler } from './api/submit-code-handler';
+export type { SubmitCodePolicy } from './api/submit-code-handler';
+export { bearerAuth, hmacAuth } from './api/auth';
+export type { HmacAuthOptions } from './api/auth';
+export { pickBindings } from './api/bindings';
 
 // Cancellation primitive.
-export { CancelToken } from './api/cancel.js';
+export { CancelToken } from './api/cancel';
 
 
 // Purity helpers (preserved from v0.2).
-export { pure, isPure, constant } from './api/primitives.js';
-export type { Pure } from './api/primitives.js';
+export { pure, isPure, constant } from './api/primitives';
+export type { Pure } from './api/primitives';
 
 // Codegen / serialize (low-level escape hatches; most users don't need these).
-export { generateWorkerSource, buildWorkerCode, DEFAULT_COMPAT_DATE } from './loader/codegen.js';
-export type { WorkerCodeOptions, GenerateSourceOptions, CodegenMode } from './loader/codegen.js';
-export { serializeFunction, hashSource, canonicalizeContext } from './loader/serialize.js';
-export { buildCacheKey } from './loader/cache-key.js';
-export type { CacheKeyStrategy } from './loader/cache-key.js';
+export { generateWorkerSource, buildWorkerCode, DEFAULT_COMPAT_DATE } from './loader/codegen';
+export type { WorkerCodeOptions, GenerateSourceOptions, CodegenMode } from './loader/codegen';
+export { serializeFunction, hashSource, canonicalizeContext } from './loader/serialize';
+export { buildCacheKey } from './loader/cache-key';
+export type { CacheKeyStrategy } from './loader/cache-key';
 
 // Topology selector (escape hatch for deterministic tests).
-export { selectTopology } from './topology/selector.js';
-export type { Topology, SelectorOptions } from './topology/selector.js';
-export { balancedFill } from './topology/plan.js';
+export { selectTopology } from './topology/selector';
+export type { Topology, SelectorOptions } from './topology/selector';
+export { balancedFill } from './topology/plan';
 export type {
   TopologyName,
   TopologyPlan,
@@ -48,7 +48,7 @@ export type {
   HybridPlan,
   TreePlan,
   LoaderOnlyPlan,
-} from './topology/plan.js';
+} from './topology/plan';
 
 // Errors.
 export {
@@ -81,13 +81,13 @@ export {
   isAggregateExecutionError,
   isDeadlineExceededError,
   isTimeoutError,
-} from './errors/index.js';
+} from './errors/index';
 export type {
   BillingLimitKind,
   PartialResultEntry,
   ErrorCode,
   WireError,
-} from './errors/index.js';
+} from './errors/index';
 
 // Type re-exports for option shapes.
 export type {
@@ -114,7 +114,7 @@ export type {
   ObservabilityOptions,
   AnalyticsEngineDataset,
   WorkerCodeOptions as PublicWorkerCodeOptions,
-} from './api/options.js';
+} from './api/options';
 
 // Worker Loader runtime types (until @cloudflare/workers-types ships them).
 export type {
@@ -128,4 +128,4 @@ export type {
   ModuleContent,
   WorkerCodeLimits,
   RpcEnvelope,
-} from './types.js';
+} from './types';

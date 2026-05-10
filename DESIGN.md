@@ -1,24 +1,25 @@
 # Architecture
 
-Design spec for `cloudflare-parallel`. The companion contributor reference
-lives in [`docs/cf-internals.md`](docs/cf-internals.md) (Cloudflare Workers
-internals). Migration path from v0.2 is in [`MIGRATION.md`](MIGRATION.md).
+Design spec for `cloudflare-parallel`. Public Cloudflare documentation
+([developers.cloudflare.com](https://developers.cloudflare.com/)) is the
+source of every external claim in this document; runtime constraints are
+either drawn from there or measured empirically against deployed Workers.
 
 ## §1 — Goals & non-goals
 
 ### Goals
 
 1. **Absolute maximum parallelism** within Cloudflare's runtime constraints. The composed-topology math (the loader-cap × DO fan-out composition: N child DOs × 4 loaders each = 4N parallel isolates) is the design driver. Hierarchical tree extends 4N to 4 × F^K for branching factor F and K tiers.
-2. **Preserve v0.2's API quality.** A v0.2 user gets the same `pool.submit` / `pool.map` ergonomic with at most a config-only delta.
+2. **Pleasant, type-safe ergonomic** for the common case. `pool.submit(fn, ...args)` / `pool.map(fn, items)` should look like ordinary async code; closures, options, cancel tokens flow through without ceremony.
 3. **Add a job scheduler primitive** (`Parallel.scheduler`) with backpressure, retries, deadlines, cancellation, optional persistence (DO-storage default; Queues / D1 / custom adapters).
-4. **Add long-lived stateful "thread" actors** (`Parallel.actor`, pinned-state only — see §5.2).
+4. **Add long-lived stateful actors** (`Parallel.actor`, pinned-state only — see §5.2).
 5. **Add an HTTP submit-code "VM" frontend** (`Parallel.VM` + `pool.handle()`).
 6. **Strong typing, zero-config defaults, excellent DX.**
 
 ### Non-goals
 
 - **Cost optimization.** Cost is not a concern. Library never refuses work on cost grounds; never hedges; never adds back-pressure surfaces motivated by billing. Documented orphan-isolate behavior is contract, not concern.
-- **DO Facets as a backend.** v0.3 does not use them. See `docs/cf-internals.md` for why.
+- **DO Facets as a backend.** v0.3 does not use them; the hybrid + tree topology already gives strictly more parallelism than a same-metal facet pool would. Reconsider once facets ship capabilities-in-props.
 - Container Durable Objects as a backend (reserved namespace `Parallel.container(...)` for future).
 - Cross-region replication of state. v0.3 is single-region per coordinator.
 - Python user code. JS-only in v0.3 (`WorkerCode.modules` extension supports Python; forward-compat).
@@ -26,7 +27,7 @@ internals). Migration path from v0.2 is in [`MIGRATION.md`](MIGRATION.md).
 
 ### What "$1000 bet" means here
 
-The architecture must survive: a 4N-way composed fan-out under runtime contention; an LRU-thrash storm at 50/owner; a coordinator-DO restart mid-flight; a user fn that infinite-loops; a runtime where `cpuMs` limits aren't enforced (workerd today); STOR-5202-class FD pressure under deep tree fan-out. §11 enumerates these and the mitigations.
+The architecture must survive: a 4N-way composed fan-out under runtime contention; an LRU-thrash storm at the per-owner cache cap; a coordinator-DO restart mid-flight; a user fn that infinite-loops; a runtime where `cpuMs` limits behave differently locally than in production; high-fan-out FD pressure under deep tree fan-out. §11 enumerates these and the mitigations.
 
 ### Invariant: CPU-bound parallelism only — first-class positioning
 
@@ -46,7 +47,7 @@ Five earned abstractions. Every other type sits underneath one of these.
 
 | Abstraction | What it is | Backed by |
 |---|---|---|
-| **Pool** | Stateless fan-out unit. `submit/map/scatter/...`. Preserves v0.2's surface. | A *Coordinator* DO + a topology strategy (in-DO, hybrid, or hierarchical-tree) selected by the topology selector. |
+| **Pool** | Stateless fan-out unit. `submit/map/scatter/...`. | A *Coordinator* DO + a topology strategy (in-DO, hybrid, or hierarchical-tree) selected by the topology selector. |
 | **Actor** | Long-lived stateful actor. State pinned in the Coordinator's SQLite; user fn receives `(state, sql, ...args)`. | A Coordinator DO with per-actor SQLite namespacing. |
 | **Scheduler** | Heterogeneous job queue with retries / deadlines / cancellation / fairness / persistence. | A Coordinator DO with a `JobStore` adapter (DO-storage default; Queues / D1 / custom opt-in). |
 | **VM** | HTTP submit-code surface; opinionated wrapper around `pool.handle()`. | A `fetch` handler around a Pool + code-validation + capability-gating. |
@@ -122,10 +123,10 @@ size > 128       │  Root Coordinator DO                                 │
    tiers = ceil(log_F(size / 4)). With F=8 default:
      size=128 → K=2 (up to 256 isolates)
      size=1024 → K=3 (up to 2048)
-     size=8192 → K=4 (up to 16384)
-   Latency cost: K × DO-RPC hop (~3 ms warm, 30–80 ms cold per hop).
-   Used past 128 because (a) single-coord ~32 fan-out cap, (b)
-   STOR-5202 (single-DO FD pressure under high fan-out).
+      size=8192 → K=4 (up to 16384)
+    Latency cost: K × DO-RPC hop (~3 ms warm, 30–80 ms cold per hop).
+    Used past 128 because (a) single-coord ~32 fan-out cap, (b) deep
+    fan-out from a single DO causes back-pressure under sustained load.
 ```
 
 ```
@@ -144,7 +145,7 @@ loader-only      │      │ env.LOADER.get(id, cb)                  │
 
 ### 3.2 Why loader-only is a separate factory
 
-In-DO Topology A is strictly more parallel (4 vs 3) and only adds ~30–80 ms cold-start on first call (warm subsequent). For any production workload that ever needs `warm`, `drain`, `stats`, streaming, or `pool.handle`, the in-DO topology is correct from start. Users who specifically want zero-DO ops call `Parallel.loaderOnly(env, opts)`, which returns a structurally smaller `LoaderOnlyPool` type. Methods unimplementable without a coordinator (`warm`, `drain`, `stats`, `mapStream`, `mapOrdered`, `submitStream`, `handle`) are *absent at the type level* — calling them is a compile-time error, not a runtime no-op (avoiding v0.2's silent-fallback footgun).
+In-DO Topology A is strictly more parallel (4 vs 3) and only adds ~30–80 ms cold-start on first call (warm subsequent). For any production workload that ever needs `warm`, `drain`, `stats`, streaming, or `pool.handle`, the in-DO topology is correct from start. Users who specifically want zero-DO ops call `Parallel.loaderOnly(env, opts)`, which returns a structurally smaller `LoaderOnlyPool` type. Methods unimplementable without a coordinator (`warm`, `drain`, `stats`, `mapStream`, `mapOrdered`, `submitStream`, `handle`) are *absent at the type level* — calling them is a compile-time error, not a runtime no-op.
 
 ### 3.3 Why `WorkerEntrypoint` RPC everywhere on the wire
 
@@ -232,12 +233,12 @@ Each tier consumes one DO RPC hop (~5 ms warm, 30–80 ms cold). Total request l
 
 F = 8 is a balance between:
 - **Latency**: depth = ceil(log_F(size/4)). F=8 gives K=2 up to 256, K=3 up to 2048, K=4 up to 16k. Shallower trees mean fewer RPC hops.
-- **Per-tier RPC fan-out**: each tier emits F outbound RPCs. F=8 keeps each tier well below the documented ~32 RPC fan-out cap (~32 per request). Avoids STOR-5202-class FD pressure.
+- **Per-tier RPC fan-out**: each tier emits F outbound RPCs. F=8 keeps each tier well below the documented ~32 RPC fan-out cap. Avoids deep-fan-out back-pressure on a single DO.
 - **Subrequest budget per Worker invocation**: each tier consumes F outbound RPCs + 1 inbound. F=8 → 9 subrequests per tier; trivial against Bundled 50 / Unbound 1000.
 - **LRU thrash per leaf**: each leaf DO sees ~`size/F^K` jobs. With F=8 and 50/owner LRU per leaf process, leaves hit thrash at very different sizes.
 - **Simplicity**: `ceil(log_8(N))` is human-legible.
 
-`F = 4` is the principled alternative for high-fn-shape-diversity workloads: it gets you to ≥`size` leaves with smaller per-tier fan-out (less STOR-5202 pressure if you have many concurrent users) at the cost of one extra tier on large sizes (K=4 with F=4 reaches 1024 leaves; F=8 reaches 4096). Recommend `branchingFactor: 4` when each leaf process is likely to see >25 distinct fn shapes (≈ 50/2 LRU headroom).
+`F = 4` is the principled alternative for high-fn-shape-diversity workloads: it gets you to ≥`size` leaves with smaller per-tier fan-out (less single-DO back-pressure when you have many concurrent users) at the cost of one extra tier on large sizes (K=4 with F=4 reaches 1024 leaves; F=8 reaches 4096). Recommend `branchingFactor: 4` when each leaf process is likely to see >25 distinct fn shapes (≈ 50/2 LRU headroom).
 
 F is exposed as `opts.branchingFactor` (range 4..16). Below 4 is rejected (forces excessive depth); above 16 saturates per-tier RPC fan-out.
 
@@ -262,7 +263,7 @@ The user-facing surface is small and generic-typed end-to-end. Five entry points
 
 ### 5.0 Generic typing model
 
-`bindings`, `context`, and `Actor` state flow through the type system as type parameters. Defaults are `{}` so v0.2 call sites upgrade type-safely. **The library uses two factory functions, not overloads, to distinguish loader-only from full pools** — overload-based discrimination on a `topology` literal is type-soundness-broken when the literal is computed.
+`bindings`, `context`, and `Actor` state flow through the type system as type parameters. Defaults are `{}`. **The library uses two factory functions, not overloads, to distinguish loader-only from full pools** — overload-based discrimination on a `topology` literal is type-soundness-broken when the literal is computed.
 
 ```ts
 namespace Parallel {
@@ -305,7 +306,7 @@ namespace Parallel {
 
 Every `submit` / `enqueue` call infers fn arg/result types end-to-end. `bindings: { AI: env.AI }` makes `env.AI` typed in the user-fn signature, not `any`.
 
-**Cancel signal lives inside `env`, not as a positional argument**. When `SubmitOptions.cancel: CancelToken` is provided OR `SubmitOptions.deadline*` is set, the user fn's `env` parameter receives an additional `signal` field of type `AbortSignal` (a synchronous-pollable shape). When neither is provided, `env.signal` is still present but always-non-cancelled. v0.2 fns typed `(x, env) => env.AI.run(...)` keep working unchanged because `signal` doesn't appear as an extra positional arg.
+**Cancel signal lives inside `env`, not as a positional argument**. When `SubmitOptions.cancel: CancelToken` is provided OR `SubmitOptions.deadline*` is set, the user fn's `env` parameter receives an additional `signal` field of type `AbortSignal` (a synchronous-pollable shape). When neither is provided, `env.signal` is still present but always-non-cancelled. User fns typed `(x, env) => env.AI.run(...)` work unchanged because `signal` is not an extra positional arg.
 
 ```ts
 type AbortSignal = {
@@ -322,7 +323,7 @@ type AbortSignal = {
 // `env.signal.throwIfAborted()`, or pass directly to `fetch(url, { signal })`.
 ```
 
-This decouples fn arity from runtime SubmitOptions shape and preserves v0.2 call-site ergonomics. **All §5.x examples below assume this shape.**
+This decouples fn arity from runtime SubmitOptions shape. **All §5.x examples below assume this shape.**
 
 ### 5.1 `Parallel.pool<B, C>(env, opts) → Pool<B, C>`
 
@@ -338,11 +339,11 @@ const pool = Parallel.pool(env, {
   topology: 'auto',
   maxFanOut: 32,
   branchingFactor: 8,
-  cacheKeyStrategy: 'auto',
+  cacheKeyStrategy: 'stable',
   observability: { metrics: 'analytics-engine' },
 });
 
-// v0.2 surface preserved (signatures generic-extended for inference):
+// Public Pool surface (signatures generic-extended for inference):
 await pool.submit((x: number) => x * x, 42);                          // → number
 await pool.submit((x: number, env) => env.AI.run(...), 42);           // env: B & { signal }
 await pool.map((n: number) => n * 2, [1, 2, 3, 4, 5]);                // → number[]
@@ -517,7 +518,7 @@ export interface PoolOptions<B = {}, C = {}> {
   maxFanOut?: number;                                     // default 32 (per coordinator level)
   branchingFactor?: number;                               // tree only; default 8 (range 4..16)
   treeThreshold?: number;                                 // hybrid → tree boundary; default 128
-  cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';         // default 'auto' (60s window hybrid)
+  cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';         // default 'stable' (one isolate per fn shape; long-lived warmth)
   observability?: ObservabilityOptions;
   workerOptions?: WorkerCodeOptions;                       // compatibilityDate, etc.
 }
@@ -618,7 +619,7 @@ export type JobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 export type OnErrorStrategy = 'throw' | 'throw-fast' | 'null' | 'skip' | 'settled';
 
 // Type-narrowed pool returned by Parallel.loaderOnly().
-// Has the v0.2-shape primitives and accepts SubmitOptions.cancel.
+// All Pool primitives accept SubmitOptions.cancel.
 // Removed methods (NOT category-error redirects to Parallel.* namespace):
 //    warm, drain, stats, mapStream, mapOrdered, submitStream, handle
 // Removal rationale: each of those requires a Coordinator DO to either
@@ -626,7 +627,7 @@ export type OnErrorStrategy = 'throw' | 'throw-fast' | 'null' | 'skip' | 'settle
 // (b) maintain pool-level metrics (stats/drain), (c) prewarm DO+loader pairs (warm),
 // or (d) terminate at a coordinator-managed HTTP route (handle).
 // On loader-only there is no coordinator, so these are unimplementable —
-// and surfacing them as runtime errors (v0.2-style) recreates the silent-fallback
+// and surfacing them as runtime errors recreates the silent-fallback
 // footgun the v0.3 design fixes.
 export interface LoaderOnlyPool<B = {}, C = {}> {
   submit<A extends unknown[], R>(
@@ -690,19 +691,6 @@ test('user fn produces correct sum', async () => {
 
 `poolFake`, `actorFake`, `schedulerFake`, `vmFake`. Each enforces structured-clone-roundtrip on args/state/return so a fn that works in the fake but breaks in production is impossible by construction. Production-shaped option types accepted identically.
 
-### 5.9 Compatibility shim — `cloudflare-parallel-compat@0.2`
-
-A separate package re-exporting v0.2 surface against v0.3 internals. Lets a fleet of 50 deployed Workers upgrade *runtime* atomically and *source* gradually:
-
-```
-deps swap   →   cloudflare-parallel-compat@^0.2 (no source changes)
-              ↓ identical runtime behavior; v0.3 internals
-source migrate per Worker → cloudflare-parallel@^0.3
-              ↓ eventually drop the compat dep
-```
-
-The compat shim accepts v0.2's `Parallel.pool(env.LOADER, opts)` shape and **routes to a full `Pool` with `topology: 'in-do'`** — NOT `Parallel.loaderOnly()` — because v0.2 exposed `mapStream`/`mapOrdered` and other coordinator-required methods, which the loader-only factory does not. The compat shim therefore requires the user to also add the `CfpCoordinator` DO binding to `wrangler.toml` (one-line change scaffolded by `cloudflare-parallel doctor`). When the user adds the binding, behavior matches native v0.3. Deprecation warning printed once per cold start.
-
 ---
 
 ## §6 — Internal module layout
@@ -715,7 +703,7 @@ src/
     scheduler.ts      — Scheduler<B, C>; JobHandle<R>; cancelByTenant
     vm.ts             — Parallel.VM class + Parallel.vm() functional form
     parallel.ts       — Parallel.{pool, actor, scheduler, vm, testing} top-level
-    primitives.ts     — pure(), constant() — preserved from v0.2
+    primitives.ts     — pure(), constant()
     cancel.ts         — CancelToken (rejects, hierarchical, AsyncDisposable, fromAbortSignal, poll)
     errors.ts         — typed error hierarchy
     testing.ts        — poolFake / actorFake / schedulerFake / vmFake (in-process, structured-clone-enforcing)
@@ -795,20 +783,20 @@ testing/                — separate exports path (production bundles do not pul
 ```
 loader id = `cfp:${codeHash}`              // stable, dedups across submissions; default
 loader id = `cfp:${codeHash}:${i}`         // forced fresh isolate; opt-in per-call
-loader id = `cfp:${codeHash}:${windowMs}`  // hybrid: fresh-per-window for opt-in 'auto'
+loader id = `cfp:${codeHash}:${windowMs}`  // opt-in 'auto': fresh-per-60s-window
 ```
 
 `PoolOptions.cacheKeyStrategy: 'stable' | 'fresh' | 'auto'` controls behavior:
-- `'stable'`: one isolate per fn shape; long-lived heap reuse.
-- `'fresh'`: counter-suffixed; v0.2 behavior.
-- `'auto'` (default): hybrid — buckets by 60-second windows. Fresh isolate every 60s window per fn shape; cheap warmth within a window. Balances isolation against LRU thrash.
+- `'stable'` (default): one isolate per fn shape; long-lived heap reuse. Best for steady-state throughput. Module-level state in the loaded isolate persists between calls — user fns must not rely on per-call freshness.
+- `'fresh'`: counter-suffixed; forces a fresh isolate per call. Use only when you genuinely need a clean V8 heap per submission (testing, sandboxing distrusted code per-call). Pays full isolate-load cost on every call.
+- `'auto'` (opt-in): hybrid — buckets by 60-second windows. Fresh isolate per shape per 60s window. Use only when (a) you have a small fixed set of fn shapes AND (b) you actively want periodic isolate refresh. With high fn-shape diversity (>50 distinct shape-windows/hour) this thrashes the per-owner LRU and causes cold-start storms; the default was changed away from `'auto'` after a third-party review surfaced the eviction storm.
 
 Per-submission `{ freshIsolate: true }` overrides for hot calls.
 
 ### 7.3 Sandbox controls
 
 - `globalOutbound: null` is the default; users opt out per-pool.
-- When `null`, codegen seals `globalThis.fetch`, `globalThis.connect`, `caches.default` — defensive even though the runtime already throws (caches behavior is doc-silent, `docs/cf-internals.md`).
+- When `null`, codegen seals `globalThis.fetch`, `globalThis.connect`, `caches.default` — defensive even though the runtime already throws.
 - **Default-deny library-internal bindings.** The library's own DO bindings (`CfpCoordinator`, `CfpWorkerDO`, `CfpSubCoord`, `CfpSchedulerDO`) are NEVER forwarded to dynamic workers regardless of what user passes in `bindings:`. Hard-coded blocklist.
 - `Parallel.VM.allowBindings` and `pool.handle({ allowBindings })` further constrain what reaches user code's `env` (intersected with `pool.bindings`).
 - `ctx.exports` is opt-in inside dynamic workers (`opts.sandbox.allowCtxExports: true`); default off. Library-internal DOs are also blocklisted from `ctx.exports.X` (defense in depth).
@@ -824,11 +812,13 @@ Per-submission `{ freshIsolate: true }` overrides for hot calls.
   - If structured-clone size > 16 MiB and value is not a `ReadableStream`, auto-convert to `ReadableStream<Uint8Array>` of structured-clone-encoded chunks; coordinator de-streams.
   - If structured-clone size > 32 MiB and conversion not possible, throw `ReturnTooLargeError`.
   - Circular structures: `DataCloneError` mapped to `SerializationError`.
-- **Submit options heuristic.** v0.2's "last-positional-looks-like-options" heuristic preserved: a final positional arg is treated as `SubmitOptions` only if it's a plain object with at least one option key (`timeout`, `retries`, `retryDelay`, `context`, `cancel`, `deadline`, `deadlineMs`, `freshIsolate`, `meta`) and not a `Date`/`RegExp`/`Map`. To force a final-positional plain-object arg through, wrap in an array.
+- **Submit options heuristic.** The "last-positional-looks-like-options" heuristic: a final positional arg is treated as `SubmitOptions` only if it's a plain object with at least one option key (`timeout`, `retries`, `retryDelay`, `context`, `cancel`, `deadline`, `deadlineMs`, `freshIsolate`, `meta`) and not a `Date`/`RegExp`/`Map`. To force a final-positional plain-object arg through, wrap in an array.
 
 ### 7.5 Per-V8-isolate loader budget enforcement
 
 The library never issues more than `cap` concurrent `env.LOADER.get(...)` calls from a single V8 isolate, where `cap = 3` from a Worker fetch handler and `cap = 4` from a DO method. Implementation: a per-isolate semaphore in `loader/loader-budget.ts`. Auto-detected at coordinator startup via a small probe (cost: one cancelled DW invocation; result cached in `globalThis.cfpLoaderCap`). The cache is per-V8-isolate (per-process); a fresh DO instance re-probes once on first dispatch. Library does NOT share the value via DO storage or KV.
+
+**The per-isolate invariant.** A V8 isolate is a closed world: each isolate has its own heap, its own bag-of-globals, and its own `globalThis`. There is no shared module state across isolates — every `import` evaluates per-isolate, every top-level `let` is per-isolate, and every property assigned to `globalThis` is per-isolate by construction. We rely on this for the loader semaphore: stashing the semaphore on `globalThis.cfpLoaderSem` gives us exactly one semaphore per isolate, with zero cross-isolate coupling. Two DO instances on the same metal but in different isolates do not see each other's semaphore state — which is precisely what the hybrid topology needs to compose `4 × N` parallelism.
 
 **Permit released on caller-settle, not on `LOADER.get` resolution**. The semaphore permit returns to the pool the moment the caller's outer promise settles (success / error / cancel), regardless of whether the underlying loader call has actually completed. This avoids a deadlock where 4 cancelled-but-orphaned isolates hold all permits while the caller has moved on. Consistent with ADR-11 ("library does NOT track or cap orphan isolates"): the orphan continues running in the runtime's view, but the library's semaphore book-keeping treats the slot as available for the next dispatch.
 
@@ -976,7 +966,7 @@ If `ack` returns 0 rows, the worker's lease was lost (likely deadline expiry). R
 
 ### 9.1 Error hierarchy
 
-Backwards-compatible: every new error extends a v0.2 ancestor.
+All errors derive from `ParallelError` so a single `instanceof` catches the family.
 
 ```
 ParallelError
@@ -1010,7 +1000,7 @@ class AggregateExecutionError extends ParallelError {
 }
 ```
 
-Single-error case still throws the plain `ParallelError` (no `partialResults` wrapper). `'throw-fast'` opts into v0.2 fail-on-first behavior — also surfaces `partialResults` if any sibling completed before the cancel propagated.
+Single-error case still throws the plain `ParallelError` (no `partialResults` wrapper). `'throw-fast'` opts into fail-on-first behavior — also surfaces `partialResults` if any sibling completed before the cancel propagated.
 
 ### 9.2 Eviction & failure matrix
 
@@ -1019,7 +1009,7 @@ Single-error case still throws the plain `ParallelError` (no `partialResults` wr
 | LRU evicts cached isolate, no in-flight | invisible | Next call rebuilds; transparent. |
 | LRU evicts during in-flight | refcount pin | Call completes; transparent. |
 | LRU thrash (>50 distinct ids in flight) | empirical (PoolStats.lruEvictionLast60sCount) | Cold-start tax on evictees; no error. Document the inflection. |
-| `abortIsolate` mid-flight (workerd TODO) | RPC throws opaque disconnection | `DisconnectedError`; one auto-retry on a fresh isolate. |
+| Loaded-isolate hard abort mid-flight | RPC throws opaque disconnection | `DisconnectedError`; one auto-retry on a fresh isolate. |
 | Coordinator DO restart | RPC throws, alarms re-fire | `DisconnectedError`; library auto-retries the DO RPC once with backoff. |
 | Sub-coordinator crash mid-tree | sub-coord RPC throws | Root partial-results: completed sub-coords delivered; failed sub-coords aggregated into `AggregateExecutionError` per `onError`. One auto-retry on a different sub-coord shard. |
 | Sub-coordinator deadline mid-chain | child-token deadline race | Child cancel fires; root receives `DeadlineExceededError` from that branch; surface per `onError`. |
@@ -1057,11 +1047,11 @@ await pool.submit(async (data, env) => {
 }, payload, { cancel: token });
 ```
 
-**Live transport.** Cancel state travels caller → coordinator → child DO → loaded isolate as a `ReadableStream<Uint8Array>` carried in the loader's `env.cancelStream`. workerd structured-clones streams across DO RPC, so a single stream end-to-end is real. When the user's `CancelToken.cancel(reason)` fires, the producer enqueues a single chunk; the consumer at the loaded-isolate end reads the chunk and calls `controller.abort(new CancelledError(reason))` on a local `AbortController` whose signal is exposed as `env.signal`. Latency: bounded by RPC stream propagation (typically < 50 ms in-colo).
+**Live transport.** Cancel state travels caller → coordinator → child DO → loaded isolate as a `ReadableStream<Uint8Array>` carried in the loader's `env.cancelStream`. The Workers runtime structured-clones streams across DO RPC, so a single stream end-to-end is real. When the user's `CancelToken.cancel(reason)` fires, the producer enqueues a single chunk; the consumer at the loaded-isolate end reads the chunk and calls `controller.abort(new CancelledError(reason))` on a local `AbortController` whose signal is exposed as `env.signal`. Latency: bounded by RPC stream propagation (typically < 50 ms in-colo).
 
 **Fan-out forking.** At every level (in-DO 4-loader fan-out, hybrid leaf fan-out, tree sub-coord fan-out) the upstream stream is **tee'd** by `forkCancelStream(stream, n)` so each downstream leg gets its own single-reader copy. Cancel propagates to all branches.
 
-**Caller-side `Promise.race`.** The caller's outer promise is also raced against `cancel.cancelled`, so the caller observes `CancelledError` immediately (even if the loaded isolate is in a tight loop with no awaits). The orphan isolate continues to `cpuMs` / wall-clock — that's a runtime constraint (workerd has no `env.LOADER.abort(id)` API today; the moment it ships, the runner will also call it for active abort with no public-API change).
+**Caller-side `Promise.race`.** The caller's outer promise is also raced against `cancel.cancelled`, so the caller observes `CancelledError` immediately (even if the loaded isolate is in a tight loop with no awaits). The orphan isolate continues to `cpuMs` / wall-clock — that's a runtime constraint (the Worker Loader API does not yet expose an `abort(id)` primitive; the moment it ships, the runner will additionally actively abort with no public-API change).
 
 **`AbortSignal` not `AbortSignal`.** Web Platform alignment: no invented sigil. `signal.throwIfAborted()`, `signal.addEventListener('abort', ...)`, `signal.reason`, and any consumer that accepts an `AbortSignal` (fetch, ReadableStream.cancel, your own helpers) all work. `CancelToken.fromAbortSignal(signal)` adapts an existing AbortController; `CancelToken.signal` exposes the underlying real AbortSignal.
 
@@ -1197,7 +1187,7 @@ Replicate the loader-from-fetch test/B/C/D matrix; CI gate:
 
 ### 11.6 Testing-surface coverage
 
-- `Parallel.testing.poolFake` runs the v0.2 README example end-to-end with no `wrangler dev`.
+- `Parallel.testing.poolFake` runs production-shape examples end-to-end with no `wrangler dev`.
 - `Parallel.testing.actorFake` preserves state across `submit` calls.
 - `Parallel.testing.schedulerFake` honors retries, deadlines, cancellation in-process.
 - All fakes structured-clone-roundtrip args/state/return.
@@ -1210,43 +1200,6 @@ Replicate the loader-from-fetch test/B/C/D matrix; CI gate:
 
 ---
 
-## §12 — Versioning & deprecation from v0.2
-
-### 12.1 SemVer
-
-Package history is at 0.2.0; this release ships as **0.3.0**. Subsequent fixes 0.3.x; next surface change 0.4.0; first stable 1.0.0 once Worker Loader hits GA.
-
-### 12.2 v0.2 → v0.3 shape
-
-| v0.2 | v0.3 | Notes |
-|---|---|---|
-| `Parallel.pool(env.LOADER)` | `Parallel.pool(env)` (full pool) **or** `Parallel.loaderOnly(env, opts)` (no DO needed) | Full Pool requires DO bindings; codemod handles. `loaderOnly()` is the zero-DO opt-in for users who specifically want v0.2's loader-only ergonomic — note its surface is structurally smaller (no `warm`/`drain`/`stats`/streaming/handle methods). |
-| `wrangler.toml` `[[worker_loaders]]` | unchanged + `[[durable_objects.bindings]]` for library DOs (only for advanced features) | wrangler scaffolding emits the deltas. |
-| `pool.submit(fn, ...args, { context })` | identical | preserved |
-| `pool.map(fn, items, { onError })` | adds `'settled'`, `'throw-fast'` | additive; default `'throw'` now aggregates |
-| `pool.mapStream` / `mapOrdered` | preserved | identical generator-shaped API |
-| (none) | `pool.drain()`, `pool.stats()`, `pool.warm()`, `pool.handle()`, `pool.submitStream()` | additive |
-| (none) | `SubmitOptions.cancel: CancelToken` (no separate `pool.cancel(token)` method) | additive |
-| (none) | `Parallel.actor`, `Parallel.scheduler`, `Parallel.VM` | additive |
-
-### 12.3 Codemod
-
-`npx cloudflare-parallel migrate`:
-1. Detects `Parallel.pool(env.LOADER)` and rewrites to `Parallel.pool(env)`.
-2. Detects v0.2's `Parallel.thread` references (none should exist on npm yet) and renames to `Parallel.actor`.
-3. Identifies whether DO bindings are needed (any `pool.map` with dynamic length, any cancel/Actor/Scheduler/VM use). Prints wrangler.toml snippet.
-4. Updates imports.
-5. Preview by default; `--apply` to write.
-6. Refuses on ambiguous parses; emits TODO comment with line number.
-
-`cloudflare-parallel doctor` validates `wrangler.toml` ↔ source-code shape and emits actionable errors.
-
-### 12.4 Deprecations
-
-- v0.2's "always-incrementing counter in cache key" is removed. Default is stable-id reuse; opt-in `freshIsolate: true` per call or `cacheKeyStrategy: 'fresh'` per pool.
-
----
-
 ## §13 — Open risks + mitigations + ADRs
 
 ### 13.1 Risks
@@ -1254,11 +1207,11 @@ Package history is at 0.2.0; this release ships as **0.3.0**. Subsequent fixes 0
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | Per-V8-isolate concurrent-loader cap (3/4) is undocumented and may shift across runtime versions. | Cold-start probe in `loader-budget.ts` measures empirically; topology selector adapts. Fail-open (use measured value, fall back to 3 if probe fails). |
-| R2 | STOR-5202: high-fan-out from a single DO causes pipefitter FD pressure. | `maxFanOut: 32` per coordinator level; tree topology automatically engaged for size > 128. |
+| R2 | High-fan-out from a single DO causes back-pressure on the inter-DO transport. | `maxFanOut: 32` per coordinator level; tree topology automatically engaged for size > 128. |
 | R3 | Worker Loader pricing dedupes by `(workerId, codeHash)`/day. | v0.3 default is stable-id reuse; counter only via opt-in `freshIsolate`. (Cost is documented but not a design driver.) |
 | R4 | `AbortSignal` does not cross DO RPC. | `CancelToken` is the cancellation primitive; `CancelToken.fromAbortSignal` adapts at the caller boundary. |
 | R5 | Stub forwarding lifetime ≤ introducer's request. | `Actor` and `Scheduler` are DOs; never cache forwarded stubs across requests; rebuild via `ctx.exports` loopback each call. |
-| R6 | `cpuMs` plumbed but unenforced in workerd today; production may behave differently. | Set `limits` anyway; runtime probe at startup to learn the production error shape (§10.4). Fuzz with deliberately-overrun fns; document drift. |
+| R6 | `cpuMs` may behave differently in local dev than in production. | Set `limits` anyway; runtime probe at startup to learn the production error shape (§10.4). Fuzz with deliberately-overrun fns; document drift. |
 | R7 | LRU thrash at >50 distinct loader ids per process per owner. | Document inflection in `PoolStats.lruEvictionLast60sCount`. Cost is graceful (cold-start tax, no error). Library does NOT cap aggregate fan-out . |
 | R-Actor | Pinned-state Actor's 16 MiB structured-clone-per-submit cap. | Documented in §5.2; recommend Workflows for larger state, or partition state across actor sub-ids. |
 | R-Tree | Subrequest budgets are **per-Worker invocation**, not aggregate cross-tier. Each tree tier consumes ~F outbound RPCs + 1 inbound (≤F+1 ≈ 9 with default F=8) per Worker invocation. The real Bundled risk is at the LEAF if user-fn subrequests + 4 LOADER.get + 1 result-write > 50. | `doctor` CLI flags pools with declared user-fn subrequest count > 45. Library does NOT refuse tree topology on Bundled at construction; the per-tier ≤9 fits within Bundled 50 with massive headroom. |
@@ -1273,7 +1226,7 @@ Package history is at 0.2.0; this release ships as **0.3.0**. Subsequent fixes 0
 - Loader-only's 3-cap ceiling is strictly worse than in-do's 4-cap with only ~30–80 ms cold-start tax.
 - TypeScript overload-on-string-literal narrowing is unsound when the literal is computed (e.g., `const opts = { topology: someVar }` collapses to `Topology` and silently picks the wrong overload). The factory split makes type narrowing structural, not literal-dependent.
 
-**Cost.** Two factories instead of one. Documented; codemod handles the v0.2 → v0.3 path.
+**Cost.** Two factories instead of one. Two factories with structurally distinct return types is the right answer for compile-time soundness.
 
 ### 13.3 ADR-2: JobStore default = DO storage
 
@@ -1297,17 +1250,17 @@ Package history is at 0.2.0; this release ships as **0.3.0**. Subsequent fixes 0
 
 **Decision.** Library's cancellation primitive is `CancelToken`. `CancelToken.fromAbortSignal` adapts at the caller boundary. The user fn's `env` parameter receives an additional `signal: AbortSignal` field (`env: B & { signal: AbortSignal }`). User fns poll `env.signal.aborted` at await boundaries; coordinator's `Promise.race` returns the caller's promise immediately on cancel.
 
-**Reasoning.** `AbortSignal` does not cross DO RPC. Delivering the signal as a positional arg (the v3 draft v0 design) collides with the v0.2 `(...userArgs, env)` signature: a v0.2 fn `(x, env) => env.AI.run(...)` would receive `(42, signal)` because `env` actually contained the signal. Putting the signal inside `env` preserves v0.2 fn arity and call-site ergonomics. There is no orphan-budget concern; cost is not a design driver. When `env.LOADER.abort(id)` ships, library will additionally actively abort.
+**Reasoning.** `AbortSignal` does not cross DO RPC. Delivering the signal as a positional argument collides with the `(...userArgs, env)` user-fn shape: a fn `(x, env) => env.AI.run(...)` would receive `(42, signal)` if the signal were appended positionally. Placing the signal inside `env` keeps user-fn arity stable across cancel-on/cancel-off invocations. There is no orphan-budget concern; cost is not a design driver. When `env.LOADER.abort(id)` ships, the library will additionally actively abort.
 
 ### 13.7 ADR-6: Stable cache keys; opt-in fresh isolate
 
-**Decision.** Default loader id is `cfp:${codeHash}`. `cacheKeyStrategy: 'auto'` is the default and uses 60-second windows for a hybrid behavior. `freshIsolate: true` per call forces.
+**Decision.** Default loader id is `cfp:${codeHash}` (`cacheKeyStrategy: 'stable'`). `'auto'` (60s windows) is opt-in. `freshIsolate: true` per call forces a counter-suffixed key.
 
-**Reasoning.** Stable keys reuse warm isolates. The 60s window strikes a balance between cache reuse and isolation against module-scope state leakage.
+**Reasoning.** Stable keys reuse warm isolates and never multiply cache entries per fn shape across time. The earlier default `'auto'` (60s windows) proved unsafe in deployments with high fn-shape diversity: with the per-owner LRU bounded to ~50 entries, any deployment that rotates more than 50 distinct shape-windows per hour evicts hot loaders and pays repeated cold-start cost. A third-party review surfaced this as the dominant cause of unexpected p99 latency tails. `'auto'` is preserved as an opt-in for the small-set-of-shapes / want-periodic-refresh case.
 
 ### 13.8 ADR-7: `Parallel.actor` is pinned-state only; no facet backend
 
-**Decision.** Actor's only backend is pinned-state (state in Coordinator SQLite, structured-clone-passed to user fn). Hybrid + tree topology already exceeds anything DO Facets could provide for parallelism, so the choice incurs no parallelism cost. See `docs/cf-internals.md` for the full facet-failure rationale (depth=4, capabilities-in-props unsupported, VULN-131748, etc.).
+**Decision.** Actor's only backend is pinned-state (state in Coordinator SQLite, structured-clone-passed to user fn). Hybrid + tree topology already exceeds anything DO Facets could provide for parallelism (32 + child DOs each with its own per-isolate loader budget; not bound to one metal), so the choice incurs no parallelism cost. Facets remain on the table for v0.4 if they grow capabilities-in-props support.
 
 **Cost.** Per-submit structured-clone hop on state, capped at 16 MiB. Recommend Workflows or sub-id partitioning for larger state.
 
@@ -1315,7 +1268,7 @@ Package history is at 0.2.0; this release ships as **0.3.0**. Subsequent fixes 0
 
 **Decision.** `Parallel.loaderOnly(env, opts)` returns a `LoaderOnlyPool<B, C>` whose type does NOT have `warm`, `drain`, `stats`, `mapStream`, `mapOrdered`, `submitStream`, or `handle`. Calling any of these is a *compile-time* error, not a runtime no-op. Cancellation via `SubmitOptions.cancel` is supported (cooperative-poll inside user fn — same contract as full Pool).
 
-**Reasoning.** Runtime silent-no-op is the v0.2 silent-fallback footgun in a new dialect. Type narrowing makes constraints explicit at construction. Removed-method list is justified by impl-impossibility (each removed method requires a Coordinator DO to host iterator state, metrics, or a coordinator-managed HTTP route). `actor`/`scheduler` are NOT in the removed list because they're top-level `Parallel.actor`/`Parallel.scheduler` — they were never methods on `Pool` to begin with.
+**Reasoning.** A runtime silent-no-op (call a method that needs a coordinator on a loader-only pool, get nothing) is a footgun. Type narrowing at the factory boundary makes constraints explicit at construction. The removed-method list is justified by impl-impossibility (each requires a Coordinator DO to host iterator state, metrics, or a coordinator-managed HTTP route). `actor` / `scheduler` are NOT on the removed list because they are top-level `Parallel.actor` / `Parallel.scheduler` factories — they were never methods on `Pool`.
 
 ### 13.10 ADR-9: At-least-once execution + at-most-once result observability for Scheduler
 

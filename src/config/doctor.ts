@@ -6,7 +6,7 @@
  * diff suggestion when bindings are missing.
  */
 
-import { emitWranglerFragment, type ScaffoldNeeds } from './wrangler.js';
+import { emitWranglerFragment, type ScaffoldNeeds } from './wrangler';
 
 export interface DoctorReport {
   ok: boolean;
@@ -45,6 +45,7 @@ export function runDoctor(input: DoctorInput): DoctorReport {
     needsSubCoord: false,
     needsScheduler: false,
     needsLoader: !/\[\[worker_loaders\]\]/.test(input.wranglerToml),
+    needsInProcess: !/enable_ctx_exports/.test(input.wranglerToml),
   };
 
   for (const use of usesParallel) {

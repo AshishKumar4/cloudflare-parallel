@@ -5,13 +5,13 @@
  *
  * NOT used in production — production uses {@link DoStorageJobStore}.
  */
-import type { JobStatus } from '../../src/api/options.js';
+import type { JobStatus } from '../../src/api/options';
 import type {
   ClaimRequest,
   JobEvent,
   JobStore,
   PersistedJob,
-} from '../../src/scheduler/job-store.js';
+} from '../../src/scheduler/job-store';
 
 export class MemoryJobStore implements JobStore {
   readonly jobs = new Map<string, PersistedJob>();

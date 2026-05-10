@@ -1,5 +1,5 @@
-import type { JobStatus } from '../../api/options.js';
-import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store.js';
+import type { JobStatus } from '../../api/options';
+import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store';
 
 const SCHEMA_VERSION = 1;
 

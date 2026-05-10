@@ -1,18 +1,18 @@
-import { BindingError, MissingBindingError } from '../errors/index.js';
-import { hashSource, serializeFunction } from '../loader/serialize.js';
-import type { UserFn } from './user-fn.js';
-import { workerOptionsToWire } from '../coordinator/internal.js';
-import { buildEnvelope } from '../transport/deadline-prop.js';
-import { dispatchWithResilience } from '../transport/rpc-client.js';
-import type { ActorOptions, PoolEnv, SubmitOptions } from './options.js';
+import { BindingError, MissingBindingError } from '../errors/index';
+import { hashSource, serializeFunction } from '../loader/serialize';
+import type { UserFn } from './user-fn';
+import { workerOptionsToWire } from '../coordinator/internal';
+import { buildEnvelope } from '../transport/deadline-prop';
+import { dispatchWithResilience } from '../transport/rpc-client';
+import type { ActorOptions, PoolEnv, SubmitOptions } from './options';
 
 import type {
   CoordinatorRunRequest,
   DispatchEnvelope,
   RunOneResult,
-} from '../coordinator/protocol.js';
-import { wireToError } from './error-decode.js';
-import { splitSubmitOptions } from './loader-only-pool.js';
+} from '../coordinator/protocol';
+import { wireToError } from './error-decode';
+import { splitSubmitOptions } from './loader-only-pool';
 
 interface ActorCoordinatorStub {
   actorEnsureInitialized(state: unknown): Promise<void>;
@@ -169,7 +169,7 @@ export class ActorHandle<
 
   /**
    * Best-effort hibernation hint. DO hibernation is runtime-driven (no
-   * explicit "hibernate now" primitive in workerd today); the call is a
+   * explicit "hibernate now" primitive in the runtime today); the call is a
    * no-op kept for forward-compat. State persists across hibernation
    * cycles via DO storage.
    */

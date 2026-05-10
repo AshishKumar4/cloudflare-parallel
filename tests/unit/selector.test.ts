@@ -1,25 +1,18 @@
 import { describe, expect, it } from 'bun:test';
-import { selectTopology } from '../../src/topology/selector.js';
-import { balancedFill, type HybridPlan, type TreePlan } from '../../src/topology/plan.js';
-import { TopologyError } from '../../src/errors/index.js';
+import { selectTopology } from '../../src/topology/selector';
+import { balancedFill, type HybridPlan, type TreePlan } from '../../src/topology/plan';
+import { TopologyError } from '../../src/errors/index';
 
+// Detailed `balancedFill` / `fillCapped` coverage lives in
+// `tests/unit/topology/plan.test.ts`. The handful of cases here pin the
+// helper at sizes the topology selector cares about, plus sanity for
+// `balancedFill` direct callers.
 describe('balancedFill', () => {
-  it('size=17, n=5 → [4,4,4,4,1]', () => {
-    expect(balancedFill(17, 5)).toEqual([4, 4, 4, 4, 1]);
-  });
-  it('size=20, n=5 → [4,4,4,4,4]', () => {
+  it('size=20, n=5 → 5×[4] (exactly even)', () => {
     expect(balancedFill(20, 5)).toEqual([4, 4, 4, 4, 4]);
   });
-  it('size=10, n=3 with maxPerSlot=4 → [4,4,2]', () => {
-    expect(balancedFill(10, 3, 4)).toEqual([4, 4, 2]);
-  });
-  it('size=128, n=32 → 32×4', () => {
-    const out = balancedFill(128, 32, 4);
-    expect(out.length).toBe(32);
-    expect(out.every((v) => v === 4)).toBe(true);
-  });
-  it('throws when capacity is short of size', () => {
-    expect(() => balancedFill(20, 4, 4)).toThrow(RangeError);
+  it('size=512, n=4 → [128,128,128,128] (even tree distribution)', () => {
+    expect(balancedFill(512, 4)).toEqual([128, 128, 128, 128]);
   });
 });
 
@@ -44,7 +37,7 @@ describe('selectTopology', () => {
     const plan = selectTopology(10);
     expect((plan as HybridPlan).leafShape).toEqual([4, 4, 2]);
   });
-  it('size=17 → hybrid with leafShape [4,4,4,4,1]', () => {
+  it('size=17 → hybrid with leafShape [4,4,4,4,1] (cap-first)', () => {
     const plan = selectTopology(17);
     expect((plan as HybridPlan).leafShape).toEqual([4, 4, 4, 4, 1]);
   });
@@ -72,6 +65,47 @@ describe('selectTopology', () => {
     expect(plan.topology).toBe('tree');
     expect((plan as TreePlan).depth).toBeGreaterThanOrEqual(3);
   });
+
+  // ---- regression: tree fan-out is real, not a chain --------------------
+  // The third-party review surfaced that `balancedFill(N, F, N)` was
+  // collapsing to `[N, 0, ..., 0]`, so the tree degenerated to a chain
+  // (peak parallelism capped at the hybrid ceiling regardless of size).
+  // These tests pin every sub-tree size at sizes where the bug would
+  // surface.
+  it('size=512 → tree distributes evenly across F children (not a chain)', () => {
+    const plan = selectTopology(512) as TreePlan;
+    expect(plan.topology).toBe('tree');
+    const childSizes = plan.children.map((c) => c.size);
+    // No single child holds the whole workload.
+    expect(Math.max(...childSizes)).toBeLessThan(512);
+    // Children sum to size.
+    expect(childSizes.reduce((a, b) => a + b, 0)).toBe(512);
+    // Every child has work.
+    for (const v of childSizes) expect(v).toBeGreaterThan(0);
+  });
+  it('size=1024 → tree distributes evenly across F children (not a chain)', () => {
+    const plan = selectTopology(1024) as TreePlan;
+    expect(plan.topology).toBe('tree');
+    const childSizes = plan.children.map((c) => c.size);
+    expect(Math.max(...childSizes)).toBeLessThan(1024);
+    expect(childSizes.reduce((a, b) => a + b, 0)).toBe(1024);
+    for (const v of childSizes) expect(v).toBeGreaterThan(0);
+  });
+  it('size=2000 → tree distributes evenly at every tier', () => {
+    const plan = selectTopology(2000) as TreePlan;
+    expect(plan.topology).toBe('tree');
+    // Walk every tier; sum of children at each level equals the parent's size.
+    function checkTier(t: TreePlan): void {
+      const sum = t.children.reduce((a, c) => a + c.size, 0);
+      expect(sum).toBe(t.size);
+      for (const v of t.children.map((c) => c.size)) expect(v).toBeGreaterThan(0);
+      for (const c of t.children) {
+        if (c.topology === 'tree') checkTier(c);
+      }
+    }
+    checkTier(plan);
+  });
+
   it('explicit topology: in-do with size > 4 throws', () => {
     expect(() => selectTopology(5, { topology: 'in-do' })).toThrow(TopologyError);
   });

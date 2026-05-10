@@ -6,7 +6,7 @@ import {
   OutOfMemoryError,
   SerializationError,
   TimeoutError,
-} from '../errors/index.js';
+} from '../errors/index';
 
 interface ErrorMarshalGlobals {
   cfpCpuMsPattern?: string;
@@ -16,7 +16,7 @@ const globals = globalThis as unknown as ErrorMarshalGlobals;
 /**
  * Map a runtime / RPC error to a typed library error.
  *
- * Heuristic — public docs and workerd source don't expose canonical error
+ * Heuristic — public docs don't expose canonical error
  * shapes. We pattern-match on message/name in this fixed order:
  *
  *   1. Pass-through if `err` is already a typed library error.
@@ -67,7 +67,7 @@ export function marshalError(err: unknown): Error {
     msg.includes('CPU exceeded') ||
     lc.includes('cpu time') ||
     lc.includes('cpu limit') ||
-    lc.includes('exceeded cpu') // workerd variants
+    lc.includes('exceeded cpu') // commonly observed variants
   ) {
     return new BillingLimitError('cpuMs', msg);
   }
@@ -88,7 +88,7 @@ export function marshalError(err: unknown): Error {
     lc.includes('disconnected') ||
     lc.includes('worker terminated') ||
     lc.includes('isolate is no longer running') ||
-    lc.includes('worker reset') // workerd variant
+    lc.includes('worker reset') // commonly observed variant
   ) {
     return new DisconnectedError(msg);
   }

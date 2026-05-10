@@ -1,4 +1,4 @@
-import { BindingError } from '../errors/index.js';
+import { BindingError } from '../errors/index';
 
 /**
  * Library-internal DO binding names exposed for tests and tooling. The
@@ -14,7 +14,7 @@ export const LIBRARY_INTERNAL_BINDINGS = new Set<string>([
 ]);
 
 /**
- * Bindings that workerd cannot structured-clone across the Worker
+ * Bindings that the Workers runtime cannot structured-clone across the Worker
  * Loader boundary. Forwarding them throws
  * `Could not serialize object of type "X"` at dispatch.
  *

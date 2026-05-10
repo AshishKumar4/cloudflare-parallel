@@ -8,21 +8,89 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`CfpInProcessCoordinator`** — a `WorkerEntrypoint` loopback target
+  registered via `ctx.exports`. Pass
+  `inProcess: ctx.exports.CfpInProcessCoordinator` to `Parallel.pool` to
+  skip the Coordinator DO hop for `submit()` and small fan-outs (size
+  ≤ 4). Per-call dispatch drops from tens of milliseconds to a couple
+  of milliseconds. ([Workers `ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/))
+- **Promise pipelining** at the leaf-DO tier. `CfpWorkerDO.openSession()`
+  and `CfpSubCoord.openTreeSession()` return long-lived `RpcTarget`
+  sessions; the coordinator chains the workload call on the
+  not-yet-resolved session promise so both calls travel in a single
+  Cap'n Proto round-trip per leaf. ([Workers RPC reference](https://developers.cloudflare.com/workers/runtime-apis/rpc/))
+- **`PoolOptions.locationHint`** + **`PoolOptions.requestColo`**.
+  `requestColo` (typed string, e.g. `'SFO'`) auto-derives a
+  region hint mapping for `namespace.get(id, { locationHint })` so
+  freshly-created leaf DOs colocate with the request's incoming colo.
+  ([Data location reference](https://developers.cloudflare.com/durable-objects/reference/data-location/))
+- **`fillCapped`** companion to `balancedFill` in `src/topology/plan.ts`.
+  `balancedFill` is now true even-distribution
+  (`floor(size/n)` base + 1-extra per remainder), used by the tree
+  topology for true F-way parallel fan-out. `fillCapped` keeps the
+  cap-first behaviour (fill-`maxPerSlot`-at-a-time, last slot remainder)
+  for hybrid leaf shapes.
+- **Bundler-shim stripping** in `serializeFunction`. `__name(fn,
+  "literal")` and `__publicField(target, "key", value)` wrappers
+  emitted by esbuild's bundler runtime are now stripped at serialize
+  time, so user fns from a bundled Worker run cleanly inside loaded
+  isolates without dead `__name` references.
+- **Live edge bench** (`tests/prod/bench-live.ts`) rewritten with
+  separate `coldRunMs` / `warmRunMs` reporting, equal warmup for both
+  paths, and median-of-≥5 sampling. Output schema in
+  `bench-results-live.json` adds a `methodology` block documenting the
+  measurement contract.
+- **Regression tests** at `tests/unit/topology/plan.test.ts` pinning
+  `balancedFill` at N = 128 / 256 / 512 / 1024 and asserting tree fan-out
+  is real (not a chain).
+- **Cache-key rotation regression** at `tests/unit/cache-key.test.ts`
+  asserts that the new `'stable'` default produces exactly one cache
+  key per fn shape across time (no LRU thrash).
 - **Live demo site** at [`cloudflare-parallel-demo.pages.dev`](https://cloudflare-parallel-demo.pages.dev)
   — every primitive runnable as a CPU-bound interactive panel.
 - **Live test worker** at
   [`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev).
   Substrate validation + full library E2E run against this URL.
-- **Live edge bench** (`tests/prod/bench-live.ts`). Honest CPU-bound
-  speedup numbers per topology size, written to `bench-results-live.json`.
 - **CPU-vs-IO positioning** as a first-class invariant in `README.md`,
   `DESIGN.md`, and the new `docs/when-to-use.md`.
+- **Hero workloads** in the test worker:
+  `/workload/{mandelbrot,montecarlo,pow,ga}` — Mandelbrot tile rendering,
+  Monte Carlo π estimation, Bitcoin-style proof-of-work nonce search
+  (with cancel-on-winner via `pool.mapStream` + `CancelToken`), and a
+  genetic algorithm with N-body fitness simulation. Each is a pure-CPU
+  workload sized for ~500–800 ms / task so the per-call dispatch floor
+  is well-amortized.
 - **CPU-bound examples**: `embeddings-batch`, `raytracer`,
   `genetic-algorithm`, `build-pipeline`. The library is for CPU-heavy
   fan-out across V8 isolates.
+- **README Performance section** documenting the three RPC
+  optimizations (`inProcess`, promise pipelining, `locationHint`) in
+  public-doc language with links to canonical Cloudflare docs.
 - **README API exposure pass.** Every public method on `Pool` /
   `LoaderOnlyPool` / `ActorHandle` / `Scheduler` / `VM` is listed
   with a short example.
+
+### Changed
+
+- **Default `cacheKeyStrategy: 'stable'`** across all five factories
+  (`pool`, `actor`, `scheduler`, `vm`, `loaderOnly`). The previous
+  default `'auto'` (60-second windows) thrashed the per-owner LRU
+  whenever fn-shape diversity exceeded ~50 distinct shape-windows per
+  hour, causing repeated cold-start. `'auto'` is preserved as an
+  opt-in for the small-fixed-set-of-shapes / want-periodic-refresh
+  case. (Surfaced in third-party review.)
+- **`balancedFill` semantics.** Previously cap-first, which collapsed
+  `balancedFill(N, F, N)` to `[N, 0, ..., 0]` — the tree topology
+  was passing exactly that and degenerating to a chain. Now true even
+  distribution; the hybrid leaf shape uses `fillCapped` instead.
+  (Surfaced in third-party review; the brokenness capped peak
+  parallelism at 128 regardless of size.)
+- **`fanOutPerLevel`** in `PoolStats` now appends the per-leaf loader
+  count for tree topologies, so the multiplicative tier structure is
+  fully visible (e.g. `[8, 8, 8, 1, 4]` for size=512).
+- **Bench harness methodology.** Equal warmup for both paths,
+  median-of-≥5 sampling, separate cold/warm fields. (Surfaced in
+  third-party review.)
 
 ### Removed
 
@@ -32,7 +100,7 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0]
 
-Major rewrite. **Breaking changes** — see [`MIGRATION.md`](MIGRATION.md).
+Initial public release.
 
 ### Added
 
@@ -44,7 +112,7 @@ Major rewrite. **Breaking changes** — see [`MIGRATION.md`](MIGRATION.md).
   (~128 concurrent isolates per scheduler DO).
 - **Live AbortSignal cancel.** `CancelToken.signal` is a real `AbortSignal`
   driven end-to-end via a `ReadableStream` (caller → Coordinator → child DO →
-  loaded isolate). Replaces the v0.2 snapshot-only model.
+  loaded isolate).
 - **Unified submit-code primitive.** `pool.handle()` and `Parallel.vm` both
   compose on `submitCodeHandler` with a required `policy` field. Built-in
   `bearerAuth` and `hmacAuth` recipes; reserved `Cfp*` namespace
@@ -65,12 +133,13 @@ Major rewrite. **Breaking changes** — see [`MIGRATION.md`](MIGRATION.md).
   (`isBackpressureError`, `isCancelledError`, `isExecutionError`,
   `isAggregateExecutionError`, `isDeadlineExceededError`, `isTimeoutError`,
   `isParallelError`) work on both class instances and cross-RPC wire shapes.
-- **`Cfp*` PascalCase rename** for library-internal DOs (was `__cfp_*`).
+- **`Cfp*` PascalCase namespace** for library-internal DOs.
 - **`pickBindings(env, keys)`** — typed key-filter helper.
-- **Per-example READMEs** in `examples/research-agent/`,
-  `examples/web-crawler/`, `examples/scheduler/`, `examples/vm/`.
+- **Per-example READMEs** in `examples/scheduler/`, `examples/vm/`,
+  `examples/embeddings-batch/`, `examples/raytracer/`,
+  `examples/genetic-algorithm/`, `examples/build-pipeline/`.
 - **`docs/` folder.** `architecture.md`, `security.md`, `tuning.md`,
-  `troubleshooting.md`, `cf-internals.md`.
+  `troubleshooting.md`, `when-to-use.md`.
 - **CI gates.** ESLint flat config, Prettier, `.editorconfig`. CI runs
   format-check + lint + typecheck + tests + bench + bundle-size budget.
 - **Method-level TSDoc** on every public symbol.
@@ -106,6 +175,4 @@ Major rewrite. **Breaking changes** — see [`MIGRATION.md`](MIGRATION.md).
 - `bearerAuth` prefers `crypto.subtle.timingSafeEqual` when available;
   falls back to a hand-rolled XOR-OR loop.
 
-## [0.2.0]
 
-See `MIGRATION.md` for the v0.2 surface and migration path.

@@ -6,7 +6,7 @@
  *
  * The whole point: interact with `cloudflare-parallel` end-to-end against
  * a real Cloudflare deployment, with honest live numbers — not local
- * workerd, not mocked, not pre-recorded.
+ * the Workers runtime, not mocked, not pre-recorded.
  */
 
 const API = 'https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev';
@@ -113,7 +113,7 @@ async function runHero(): Promise<void> {
 
   try {
     // ① Sequential baseline at size=min(heroSize, 32) — measured
-    //    client-side because workerd's Date.now() is throttled.
+    //    client-side because the runtime's Date.now() is throttled.
     const seqN = Math.min(heroSize, 32);
     const seqItems = Array.from({ length: seqN }, (_, i) => i + 1);
     const tSeq = performance.now();

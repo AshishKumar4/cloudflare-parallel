@@ -7,5 +7,5 @@
  *   const fake = Parallel.testing.poolFake({ bindings: { KV: kvStub } });
  */
 
-export { Parallel } from './api/parallel.js';
-export { poolFake, loaderOnlyFake, actorFake, schedulerFake, vmFake } from './api/testing.js';
+export { Parallel } from './api/parallel';
+export { poolFake, loaderOnlyFake, actorFake, schedulerFake, vmFake } from './api/testing';

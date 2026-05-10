@@ -217,7 +217,7 @@ export class ExecutionError extends ParallelError {
 }
 
 /**
- * Eviction-mid-flight or workerd `abortIsolate` TODO surfaces as opaque
+ * Eviction-mid-flight or a runtime hard-abort surfaces as opaque
  * disconnection. Library auto-retries once on a fresh isolate (DESIGN §9.2).
  */
 export class DisconnectedError extends ExecutionError {

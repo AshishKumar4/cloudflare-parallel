@@ -1,9 +1,9 @@
-import { Pool } from './pool.js';
-import { LoaderOnlyPoolImpl, type LoaderOnlyPool } from './loader-only-pool.js';
-import { ActorHandle } from './actor.js';
-import { Scheduler } from './scheduler.js';
-import { VM, vm, type VMHandle } from './vm.js';
-import { poolFake, loaderOnlyFake, actorFake, schedulerFake, vmFake } from './testing.js';
+import { Pool } from './pool';
+import { LoaderOnlyPoolImpl, type LoaderOnlyPool } from './loader-only-pool';
+import { ActorHandle } from './actor';
+import { Scheduler } from './scheduler';
+import { VM, vm, type VMHandle } from './vm';
+import { poolFake, loaderOnlyFake, actorFake, schedulerFake, vmFake } from './testing';
 import type {
   ActorOptions,
   LoaderOnlyOptions,
@@ -11,7 +11,7 @@ import type {
   PoolOptions,
   SchedulerOptions,
   VMOptions,
-} from './options.js';
+} from './options';
 
 /**
  * Top-level namespace. Each factory has a clear, narrow purpose:
@@ -49,7 +49,7 @@ export const Parallel = {
   /**
    * Loader-only pool — no Coordinator DO. Use for fire-and-forget
    * dispatches from the Worker fetch handler. Limited to 3 concurrent
-   * loaders per fetch handler (workerd cap). Lacks `mapStream`,
+   * loaders per fetch handler (documented runtime cap). Lacks `mapStream`,
    * `mapOrdered`, `submitStream`, `warm`, `drain`, `stats`, `handle`,
    * `restrictTo` — those require the coordinator.
    */

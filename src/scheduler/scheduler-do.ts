@@ -1,15 +1,15 @@
 import { DurableObject } from 'cloudflare:workers';
-import type { WorkerLoader } from '../types.js';
-import { LoaderRunner } from '../loader/runner.js';
-import { DoStorageJobStore } from './stores/do-storage.js';
-import type { JobStore, PersistedJob } from './job-store.js';
-import { type DispatchEnvelope, type RunOneRequest } from '../coordinator/protocol.js';
-import type { JobStatus, RetryPolicy } from '../api/options.js';
+import type { WorkerLoader } from '../types';
+import { LoaderRunner } from '../loader/runner';
+import { DoStorageJobStore } from './stores/do-storage';
+import type { JobStore, PersistedJob } from './job-store';
+import { type DispatchEnvelope, type RunOneRequest } from '../coordinator/protocol';
+import type { JobStatus, RetryPolicy } from '../api/options';
 import {
   Dispatcher,
   DEFAULT_DISPATCHER_CONFIG,
   type DispatcherConfig,
-} from './dispatcher.js';
+} from './dispatcher';
 
 const ALARM_SWEEP_MS = 5_000;
 const IDLE_ALARM_MS = 60_000;

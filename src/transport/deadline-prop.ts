@@ -1,6 +1,6 @@
-import { DeadlineExceededError, DeadlineTooShortError, SerializationError } from '../errors/index.js';
-import type { RpcEnvelope } from '../types.js';
-import type { CancelToken } from '../api/cancel.js';
+import { DeadlineExceededError, DeadlineTooShortError, SerializationError } from '../errors/index';
+import type { RpcEnvelope } from '../types';
+import type { CancelToken } from '../api/cancel';
 
 const MIN_DEADLINE_BUDGET_MS = 1000;
 

@@ -1,5 +1,5 @@
-import { SerializationError } from '../errors/index.js';
-import type { UserFn } from './user-fn.js';
+import { SerializationError } from '../errors/index';
+import type { UserFn } from './user-fn';
 
 /**
  * Brand for "purity-validated" functions. Branding a function only checks

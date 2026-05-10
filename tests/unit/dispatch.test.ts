@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { dispatchWithResilience, withRaces } from '../../src/transport/rpc-client.js';
+import { dispatchWithResilience, withRaces } from '../../src/transport/rpc-client';
 import {
   BackpressureError,
   CancelledError,
   DeadlineExceededError,
   RetryExhaustedError,
   TimeoutError,
-} from '../../src/errors/index.js';
-import { CancelToken } from '../../src/api/cancel.js';
+} from '../../src/errors/index';
+import { CancelToken } from '../../src/api/cancel';
 
 describe('withRaces', () => {
   it('resolves the task when no race fires', async () => {

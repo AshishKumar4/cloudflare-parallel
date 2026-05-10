@@ -1,6 +1,6 @@
 {
   "target": "live-edge:https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev",
-  "ts": "2026-05-10T03:16:49.127Z",
+  "ts": "2026-05-10T04:06:33.149Z",
   "summary": {
     "total": 34,
     "passed": 34,
@@ -10,12 +10,12 @@
     {
       "name": "pool/submit",
       "ok": true,
-      "ms": 22
+      "ms": 19
     },
     {
       "name": "pool/map size=4",
       "ok": true,
-      "ms": 20,
+      "ms": 23,
       "data": {
         "topology": "in-do",
         "fanOutPerLevel": [
@@ -27,7 +27,7 @@
     {
       "name": "pool/map size=8",
       "ok": true,
-      "ms": 447,
+      "ms": 449,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -41,7 +41,7 @@
     {
       "name": "pool/map size=16",
       "ok": true,
-      "ms": 2535,
+      "ms": 525,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -57,7 +57,7 @@
     {
       "name": "pool/map size=32",
       "ok": true,
-      "ms": 542,
+      "ms": 585,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -77,7 +77,7 @@
     {
       "name": "pool/map size=64",
       "ok": true,
-      "ms": 708,
+      "ms": 844,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -105,7 +105,7 @@
     {
       "name": "pool/map size=128",
       "ok": true,
-      "ms": 1144,
+      "ms": 4774,
       "data": {
         "topology": "hybrid",
         "fanOutPerLevel": [
@@ -149,7 +149,7 @@
     {
       "name": "pool/map size=256",
       "ok": true,
-      "ms": 1593,
+      "ms": 1598,
       "data": {
         "topology": "tree",
         "fanOutPerLevel": [
@@ -163,7 +163,7 @@
     {
       "name": "pool/map size=512",
       "ok": true,
-      "ms": 3882,
+      "ms": 4093,
       "data": {
         "topology": "tree",
         "fanOutPerLevel": [
@@ -183,12 +183,12 @@
     {
       "name": "pool/reduce",
       "ok": true,
-      "ms": 27
+      "ms": 31
     },
     {
       "name": "pool/pmap",
       "ok": true,
-      "ms": 20
+      "ms": 25
     },
     {
       "name": "pool/pipe",
@@ -198,7 +198,7 @@
     {
       "name": "pool/mapStream",
       "ok": true,
-      "ms": 20
+      "ms": 22
     },
     {
       "name": "pool/mapOrdered",
@@ -208,12 +208,12 @@
     {
       "name": "pool/cancel (mid-flight)",
       "ok": true,
-      "ms": 19
+      "ms": 26
     },
     {
       "name": "pool/warm",
       "ok": true,
-      "ms": 31
+      "ms": 32
     },
     {
       "name": "pool/stats",
@@ -233,32 +233,32 @@
     {
       "name": "actor/inc 2",
       "ok": true,
-      "ms": 54
+      "ms": 47
     },
     {
       "name": "actor/inc 3",
       "ok": true,
-      "ms": 57
+      "ms": 47
     },
     {
       "name": "actor/state",
       "ok": true,
-      "ms": 34
+      "ms": 33
     },
     {
       "name": "actor/close",
       "ok": true,
-      "ms": 47
+      "ms": 38
     },
     {
       "name": "scheduler/enqueue",
       "ok": true,
-      "ms": 364
+      "ms": 460
     },
     {
       "name": "scheduler/result",
       "ok": true,
-      "ms": 19
+      "ms": 16
     },
     {
       "name": "scheduler/enqueue idem",
@@ -283,7 +283,7 @@
     {
       "name": "scheduler/cancel-tenant",
       "ok": true,
-      "ms": 16
+      "ms": 17
     },
     {
       "name": "vm POST (no auth) → 401",
@@ -293,7 +293,7 @@
     {
       "name": "vm POST (with auth) → 200",
       "ok": true,
-      "ms": 21
+      "ms": 23
     },
     {
       "name": "loader-only/map",
@@ -303,12 +303,12 @@
     {
       "name": "errors/timeout (TimeoutError)",
       "ok": true,
-      "ms": 206
+      "ms": 207
     },
     {
       "name": "errors/aggregate (AggregateExecutionError)",
       "ok": true,
-      "ms": 25
+      "ms": 21
     }
   ]
 }

@@ -1,5 +1,8 @@
 name = "cloudflare-parallel-prod-tests"
 main = "src/index.ts"
+# Compatibility date 2025-11-17+ enables `ctx.exports.<WorkerEntrypoint>`
+# loopback bindings by default — no extra flag needed.
+# https://developers.cloudflare.com/workers/configuration/compatibility-flags/#enable-ctxexports
 compatibility_date = "2026-01-20"
 
 [[worker_loaders]]
