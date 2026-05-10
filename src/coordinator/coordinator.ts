@@ -234,29 +234,9 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     const leafResults = await Promise.all(
       slices.map(async (slice, leafIdx): Promise<RunOneResult[]> => {
         if (slice.length === 0) return [];
-        const stub = getStub<WorkerDOStub>(
-          ns,
-          `${this.ctx.id.toString()}-${requestId}-leaf-${leafIdx}`,
-          request.locationHint,
-        );
+        const leafName = `${this.ctx.id.toString()}-${requestId}-leaf-${leafIdx}`;
         try {
-          // Promise pipelining: open a session and call runBatch on it
-          // without awaiting the session promise. The runtime sends
-          // openSession() and runBatch() in a single Cap'n Proto round-trip.
-          // Reference: https://developers.cloudflare.com/workers/runtime-apis/rpc/
-          const session = stub.openSession();
-          const result = await session.runBatch({
-            fnSource: request.fnSource,
-            fnHash: request.fnHash,
-            context: request.context,
-            workerOptions: request.workerOptions,
-            cacheKeyStrategy: request.cacheKeyStrategy,
-            argsList: slice,
-            envelope: request.envelope,
-            freshIsolate: request.freshIsolate,
-            cancelStream: childStreams[leafIdx],
-          });
-          return result.results;
+          return await invokeLeafBatchWithRetry(ns, leafName, request, slice, childStreams[leafIdx]);
         } catch (err) {
           return slice.map(() => errorToFailedResult(err));
         }
@@ -295,35 +275,47 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     const subResults = await Promise.all(
       slices.map(async (slice, subIdx): Promise<RunOneResult[]> => {
         if (slice.length === 0) return [];
-        const stub = getStub<SubCoordStub>(
-          ns,
-          `${this.ctx.id.toString()}-${requestId}-sub-${subIdx}`,
-          request.locationHint,
-        );
-        try {
-          // Promise pipelining: chain dispatch on the not-yet-resolved
-          // session promise so both calls travel in one round-trip.
-          const session = stub.openTreeSession();
-          const result = await session.dispatch({
-            fnSource: request.fnSource,
-            fnHash: request.fnHash,
-            context: request.context,
-            workerOptions: request.workerOptions,
-            cacheKeyStrategy: request.cacheKeyStrategy,
-            argsList: slice,
-            // Tell the sub-coord to slice its received argsList per its own children.
-            planChildSizes: planSliceChildSizes(plan.children[subIdx]),
-            branchingFactor: plan.branchingFactor,
-            depth: plan.depth - 1,
-            maxFanOut: request.selector?.maxFanOut ?? 32,
-            envelope: request.envelope,
-            cancelStream: childStreams[subIdx],
-            locationHint: request.locationHint,
-          });
-          return result.results;
-        } catch (err) {
-          return slice.map(() => errorToFailedResult(err));
+        const subName = `${this.ctx.id.toString()}-${requestId}-sub-${subIdx}`;
+        const buildReq = (cancelStream: ReadableStream<Uint8Array> | undefined): DispatchTreeRequest => ({
+          fnSource: request.fnSource,
+          fnHash: request.fnHash,
+          context: request.context,
+          workerOptions: request.workerOptions,
+          cacheKeyStrategy: request.cacheKeyStrategy,
+          argsList: slice,
+          // Tell the sub-coord to slice its received argsList per its own children.
+          planChildSizes: planSliceChildSizes(plan.children[subIdx]),
+          branchingFactor: plan.branchingFactor,
+          depth: plan.depth - 1,
+          maxFanOut: request.selector?.maxFanOut ?? 32,
+          envelope: request.envelope,
+          cancelStream,
+          locationHint: request.locationHint,
+        });
+        // Same retry policy as `invokeLeafBatchWithRetry`: up to 2
+        // retries on transient platform errors, jittered backoff to
+        // avoid retry thundering herds. See that helper for the
+        // rationale; tree dispatch hits the same DO creation pressure
+        // at large N.
+        const MAX_RETRIES = 2;
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const stub = getStub<SubCoordStub>(ns, subName, request.locationHint);
+            const session = stub.openTreeSession();
+            const result = await session.dispatch(
+              buildReq(attempt === 0 ? childStreams[subIdx] : undefined),
+            );
+            return result.results;
+          } catch (err) {
+            if (!isTransientLeafError(err) || attempt === MAX_RETRIES) {
+              return slice.map(() => errorToFailedResult(err));
+            }
+            const base = 100 + attempt * 150;
+            const jitter = Math.random() * 150;
+            await new Promise<void>((resolve) => setTimeout(resolve, base + jitter));
+          }
         }
+        return slice.map(() => errorToFailedResult(new Error('sub-coord retry exhausted')));
       }),
     );
     const flat: RunOneResult[] = [];
@@ -474,4 +466,70 @@ function planFanOutPerLevel(plan: TopologyPlan): number[] {
     cursor = cursor.children[0];
   }
   return widths;
+}
+
+// Transient-error matchers live in a standalone module so unit tests
+// don't have to load `cloudflare:workers` to exercise them.
+import { isTransientLeafError } from './transient';
+
+/**
+ * Invoke `runBatch` on a leaf DO with up to 2 auto-retries on transient
+ * platform errors. Each retry uses a fresh stub (a runtime-reset DO is
+ * effectively dead until re-addressed) and waits a small jittered
+ * backoff so a thundering herd of fresh-DO creations doesn't slam the
+ * runtime in lockstep. Empirically resolves the vast majority of the
+ * "object to be reset" failures observed at large fan-out sizes (N≥256).
+ *
+ * Why two retries: a single retry is enough on a quiescent platform,
+ * but under heavy concurrent DO creation (e.g. a bench burst right at
+ * the size cliff) the runtime occasionally hits the transient twice in
+ * a row. Two retries × N leaves running in parallel is bounded
+ * cost — the worst case is `2 × backoff_max = ~600 ms` added wall.
+ */
+async function invokeLeafBatchWithRetry(
+  ns: DurableObjectNamespace,
+  leafName: string,
+  request: CoordinatorFanOutRequest,
+  slice: unknown[][],
+  cancelStream: ReadableStream<Uint8Array> | undefined,
+): Promise<RunOneResult[]> {
+  const MAX_RETRIES = 2;
+  const buildBatch = (cs: ReadableStream<Uint8Array> | undefined): RunBatchRequest => ({
+    fnSource: request.fnSource,
+    fnHash: request.fnHash,
+    context: request.context,
+    workerOptions: request.workerOptions,
+    cacheKeyStrategy: request.cacheKeyStrategy,
+    argsList: slice,
+    envelope: request.envelope,
+    freshIsolate: request.freshIsolate,
+    cancelStream: cs,
+  });
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const stub = getStub<WorkerDOStub>(ns, leafName, request.locationHint);
+      // Promise pipelining: openSession() and runBatch() ride one Cap'n
+      // Proto round-trip. Reference:
+      // https://developers.cloudflare.com/workers/runtime-apis/rpc/
+      const session = stub.openSession();
+      // On the first attempt we forward the live cancel-stream; retries
+      // pass `undefined` because a ReadableStream cannot be re-read.
+      // Semantically equivalent to "no cancel arrived at this point in
+      // the fan-out", which is true at the retry boundary (a leaf reset
+      // means nothing got delivered).
+      const result = await session.runBatch(buildBatch(attempt === 0 ? cancelStream : undefined));
+      return result.results;
+    } catch (err) {
+      if (!isTransientLeafError(err) || attempt === MAX_RETRIES) throw err;
+      // Jittered backoff: 100–250 ms on attempt 1, 250–500 ms on attempt 2.
+      // Spreads the retry burst out so the runtime sees a sustained ramp
+      // rather than another thundering herd.
+      const base = 100 + attempt * 150;
+      const jitter = Math.random() * 150;
+      await new Promise<void>((resolve) => setTimeout(resolve, base + jitter));
+    }
+  }
+  // Unreachable — the loop either returns or rethrows.
+  throw new Error('invokeLeafBatchWithRetry: exhausted retries');
 }

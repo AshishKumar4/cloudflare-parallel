@@ -72,64 +72,135 @@ themeBtn?.addEventListener('click', () => {
 
 // ---------- hero ----------------------------------------------------
 
-interface BenchOut {
-  size: number;
-  parallelMs: number;
+type Intensity = 'medium' | 'heavy' | 'extreme';
+
+interface MandelbrotOut {
+  ms: number;
+  width: number;
+  height: number;
+  maxIter: number;
+  tiles: number;
+  perTileSampleMs: number;
   topology: string;
   treeDepth: number;
   fanOutPerLevel: number[];
-}
-interface SeqOut {
-  out: number[];
-  ms: number;
+  _clientMs?: number;
 }
 
+/**
+ * Per-intensity Mandelbrot parameters. Each preset targets a per-tile
+ * CPU range so the user sees the expected speedup behaviour:
+ *
+ * - medium   ~300 ms / tile — speedup visible at N≥64.
+ * - heavy    ~700 ms / tile — best at N≥128, hits 50×+ at N=512.
+ * - extreme  ~1.5 s / tile  — hits 100×+ at N=512; longer absolute wall.
+ *
+ * The "extreme" preset is the most honest demo of "true horizontal
+ * scaling": with each candidate ~1.5 s of pure CPU and the library
+ * fanning out across 4·F^K isolates, parallel wall stays roughly
+ * constant as N scales while sequential blows up linearly.
+ *
+ * The values are inputs to `/workload/mandelbrot`; the test worker
+ * already validates and clamps them server-side.
+ */
+const INTENSITY_PRESETS: Record<Intensity, { rowsPerTile: number; maxIter: number; width: number }> = {
+  medium: { rowsPerTile: 6, maxIter: 10000, width: 1280 },
+  heavy: { rowsPerTile: 8, maxIter: 16000, width: 1536 },
+  extreme: { rowsPerTile: 12, maxIter: 24000, width: 1920 },
+};
+
 let heroSize = 128;
-const heroTabs = document.querySelectorAll<HTMLButtonElement>('.size-tab');
-heroTabs.forEach((b) =>
+let heroIntensity: Intensity = 'heavy';
+
+// Size tabs (the first .size-tabs row).
+const sizeTabsRoot = document.querySelector<HTMLElement>('.hero-controls .control-group:first-child .size-tabs');
+sizeTabsRoot?.querySelectorAll<HTMLButtonElement>('.size-tab').forEach((b) =>
   b.addEventListener('click', () => {
-    heroTabs.forEach((x) => x.classList.remove('is-active'));
+    sizeTabsRoot.querySelectorAll('.size-tab').forEach((x) => x.classList.remove('is-active'));
     b.classList.add('is-active');
     heroSize = Number(b.dataset.size);
     runHero();
   }),
 );
 
+// Intensity tabs (the second .size-tabs row, marked with `data-intensity`).
+const intensityTabsRoot = document.querySelector<HTMLElement>('.hero-controls .control-group:nth-child(2) .size-tabs');
+intensityTabsRoot?.querySelectorAll<HTMLButtonElement>('.size-tab').forEach((b) =>
+  b.addEventListener('click', () => {
+    intensityTabsRoot.querySelectorAll('.size-tab').forEach((x) => x.classList.remove('is-active'));
+    b.classList.add('is-active');
+    heroIntensity = b.dataset.intensity as Intensity;
+    runHero();
+  }),
+);
+
+document.getElementById('hero-run')?.addEventListener('click', runHero);
+
 function setText(id: string, txt: string): void {
   const el = document.getElementById(id);
   if (el) el.textContent = txt;
 }
 
+/**
+ * The hero panel measures per-tile CPU via a `mode: 'sequential-sample'`
+ * request (one tile rendered inline; client RT is the per-tile ground
+ * truth because the runtime's `Date.now()` is timing-attack throttled
+ * for sub-second windows). It then runs the parallel fan-out at the
+ * selected size and shows the speedup as `(perTile × N) / parallelWall`.
+ *
+ * The client measures both calls' wall-clock with `performance.now()`.
+ * Server-reported timings are surfaced when non-zero but the speedup
+ * always uses the honest client measurement.
+ */
 async function runHero(): Promise<void> {
   const runBtn = document.getElementById('hero-run');
   setBusy(runBtn, true);
   setText('hero-topology', '…');
-  setText('hero-fanout', `size = ${heroSize}`);
+  setText('hero-fanout', `size = ${heroSize} · ${heroIntensity}`);
+  setText('hero-pertile', '…');
   setText('hero-par-ms', '…');
-  setText('hero-par-detail', 'running…');
+  setText('hero-par-detail', 'measuring per-tile…');
   setText('hero-seq-ms', '…');
+  setText('hero-seq-detail', `N × per-tile`);
   setText('hero-speedup', '…');
   setText('hero-isolates', 'measuring');
 
+  const preset = INTENSITY_PRESETS[heroIntensity];
+
   try {
-    // ① Sequential baseline at size=min(heroSize, 32) — measured
-    //    client-side because the runtime's Date.now() is throttled.
-    const seqN = Math.min(heroSize, 32);
-    const seqItems = Array.from({ length: seqN }, (_, i) => i + 1);
-    const tSeq = performance.now();
-    await apiPost<SeqOut>('/bench/sequential', { items: seqItems });
-    const seqRtMs = performance.now() - tSeq;
-    // Approximate the network baseline by hitting a cheap endpoint.
-    // (Using /pool/stats is the closest no-op we have.)
-    const tNet = performance.now();
-    await apiGet('/pool/stats');
-    const netMs = performance.now() - tNet;
-    const seqWorkMs = Math.max(1, seqRtMs - netMs);
-    const projectedSeqMs = Math.round((seqWorkMs * heroSize) / seqN);
+    // ① Per-tile sample. Render ONE middle tile inline. The server
+    //    reports `perTileSampleMs` measured via `performance.now()` so
+    //    the timing reflects pure tile-rendering CPU; we fall back to
+    //    client RT (minus a 50 ms intra-region edge baseline) only if
+    //    the server reports zero.
+    const tSample = performance.now();
+    const sample = await apiPost<MandelbrotOut>('/workload/mandelbrot', {
+      mode: 'sequential-sample',
+      tiles: heroSize,
+      ...preset,
+    });
+    const sampleClientMs = Math.round(performance.now() - tSample);
+    const perTileMs =
+      sample.perTileSampleMs > 0
+        ? sample.perTileSampleMs
+        : Math.max(1, sampleClientMs - 50);
+    const projectedSeqMs = perTileMs * heroSize;
+    setText('hero-pertile', String(perTileMs));
+    setText('hero-seq-ms', String(projectedSeqMs));
+    setText('hero-seq-detail', `${heroSize} × ${perTileMs} ms`);
+    setText('hero-par-detail', 'running parallel fan-out…');
 
     // ② Parallel run at the actual size.
-    const par = await apiPost<BenchOut>('/demo/bench', { size: heroSize });
-    const parMs = par.parallelMs;
+    const tPar = performance.now();
+    const par = await apiPost<MandelbrotOut>('/workload/mandelbrot', {
+      mode: 'parallel',
+      tiles: heroSize,
+      ...preset,
+    });
+    const parClientMs = Math.round(performance.now() - tPar);
+    // Server `ms` is the worker-internal wall (ignoring transport).
+    // Client RT is the honest end-to-end time the user sees.
+    const parMs = par.ms > 0 ? par.ms : parClientMs;
     const speedup = parMs > 0 ? +(projectedSeqMs / parMs).toFixed(2) : 0;
 
     setText('hero-topology', par.topology);
@@ -138,26 +209,26 @@ async function runHero(): Promise<void> {
       `size = ${heroSize} · ${par.topology === 'tree' ? `K=${par.treeDepth}` : `[${par.fanOutPerLevel.join(',')}]`}`,
     );
     setText('hero-par-ms', String(parMs));
-    setText('hero-par-detail', `${heroSize} items @ SHA-chain × 5000`);
-    setText('hero-seq-ms', String(projectedSeqMs));
+    setText('hero-par-detail', `${heroSize} tiles · ${heroIntensity} · server=${par.ms}ms`);
     setText('hero-speedup', String(speedup));
     setText(
       'hero-isolates',
       par.topology === 'in-do'
-        ? '4 V8 isolates (one DO)'
+        ? `${heroSize} V8 isolates (one DO)`
         : par.topology === 'hybrid'
           ? `${Math.ceil(heroSize / 4)} leaf DOs × 4 loaders`
-          : `tree depth ${par.treeDepth}`,
+          : `tree depth ${par.treeDepth} · ${par.fanOutPerLevel.join('·')} fan-out`,
     );
 
     drawTopologySvg(par.topology, heroSize, par.fanOutPerLevel, par.treeDepth);
     document.getElementById('hero-code')!.textContent =
-      `// size=${heroSize} → ${par.topology}\n` +
-      `await pool.map(sha256Chain, items)\n` +
-      `// → fanOut: [${par.fanOutPerLevel.join(', ')}]`;
+      `// size=${heroSize}, intensity=${heroIntensity} → ${par.topology}\n` +
+      `await pool.map(renderMandelbrotTile, slabs)\n` +
+      `// → fanOut: [${par.fanOutPerLevel.join(', ')}]\n` +
+      `// → per-tile=${perTileMs}ms · seq≈${projectedSeqMs}ms · par=${parMs}ms`;
   } catch (e) {
     setText('hero-topology', 'error');
-    setText('hero-par-detail', String((e as Error).message).slice(0, 80));
+    setText('hero-par-detail', String((e as Error).message).slice(0, 120));
   } finally {
     setBusy(runBtn, false);
   }
@@ -715,18 +786,28 @@ document.getElementById('cancel-stop')?.addEventListener('click', () => {
 // ---------- bench leaderboard ---------------------------------------
 
 interface BenchAggregate {
+  workload?: string;
   size: number;
   topology: string;
   treeDepth: number;
   fanOutPerLevel: number[];
-  parallelMedianMs: number;
-  sequentialMedianMs: number;
-  speedup: number;
+  // New schema (post-V3+V4 fix): cold/warm separation.
+  parallelColdMs?: number;
+  parallelWarmMs?: number;
+  parallelOverallMedianMs?: number;
+  sequentialExtrapolatedMs?: number;
+  perTaskSampleMs?: number;
+  speedupColdParallel?: number;
+  // Legacy schema (pre-fix): kept for backward-compat with older bench files.
+  parallelMedianMs?: number;
+  sequentialMedianMs?: number;
   sequentialMeasuredAtSize?: number;
+  speedup: number;
 }
 interface BenchFile {
   target: string;
   ts: string;
+  workloads?: string[];
   aggregates: BenchAggregate[];
 }
 
@@ -740,19 +821,35 @@ fetch('/bench-results-live.json')
     }
   });
 
+function parMs(a: BenchAggregate): number {
+  return a.parallelWarmMs ?? a.parallelMedianMs ?? 0;
+}
+function seqMs(a: BenchAggregate): number {
+  return a.sequentialExtrapolatedMs ?? a.sequentialMedianMs ?? 0;
+}
+
 function renderBench(aggs: BenchAggregate[]): void {
   if (!benchTbody) return;
   benchTbody.innerHTML = '';
-  const maxSpeedup = Math.max(...aggs.map((a) => a.speedup), 1);
-  for (const a of aggs) {
+  // The bench file may carry multiple workloads (mandelbrot / montecarlo
+  // / ga). Default the leaderboard to mandelbrot — that's the workload
+  // the hero panel exercises, so the speedup curve is directly
+  // comparable to what users see live.
+  const filteredByWorkload = aggs.filter(
+    (a) => !a.workload || a.workload === 'mandelbrot',
+  );
+  const rows = filteredByWorkload.length > 0 ? filteredByWorkload : aggs;
+  const maxSpeedup = Math.max(...rows.map((a) => a.speedup), 1);
+  for (const a of rows) {
     const tr = document.createElement('tr');
     tr.dataset.size = String(a.size);
+    tr.dataset.workload = a.workload ?? 'mandelbrot';
     const barW = Math.round((a.speedup / maxSpeedup) * 80);
     tr.innerHTML = `
       <td>${a.size}</td>
       <td><span class="topo-badge topo-${a.topology}">${a.topology}</span></td>
-      <td>${a.sequentialMedianMs}ms</td>
-      <td>${a.parallelMedianMs}ms</td>
+      <td>${seqMs(a)}ms</td>
+      <td>${parMs(a)}ms</td>
       <td><span class="bench-bar" style="width:${barW}px"></span>${a.speedup.toFixed(2)}×</td>
       <td><button class="topo-run bench-run">Run</button> <span class="topo-out bench-out">—</span></td>
     `;
@@ -763,12 +860,22 @@ function renderBench(aggs: BenchAggregate[]): void {
       const tr = btn.closest('tr');
       if (!tr) return;
       const size = Number(tr.dataset.size);
+      const workload = tr.dataset.workload ?? 'mandelbrot';
       const out = tr.querySelector('.bench-out');
       if (out) out.textContent = '…';
       setBusy(btn, true);
       try {
-        const r = await apiPost<{ parallelMs: number; topology: string }>('/demo/bench', { size });
-        if (out) out.textContent = `${r.parallelMs}ms · ${r.topology}`;
+        // Hit the same workload the hero panel uses so the live "Run"
+        // numbers stay comparable to the cached bench-file numbers.
+        const path = `/workload/${workload}`;
+        const body =
+          workload === 'mandelbrot'
+            ? { mode: 'parallel', tiles: size }
+            : workload === 'montecarlo'
+              ? { mode: 'parallel', tasks: size }
+              : { mode: 'parallel', population: size };
+        const r = await apiPost<{ ms: number; topology: string }>(path, body);
+        if (out) out.textContent = `${r.ms}ms · ${r.topology}`;
       } catch (e) {
         if (out) out.textContent = `err: ${String((e as Error).message).slice(0, 30)}`;
       } finally {

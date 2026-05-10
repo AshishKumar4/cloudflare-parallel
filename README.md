@@ -248,14 +248,20 @@ const totalEnergy = await pool.reduce(
 );
 ```
 
-### `pool.warm({ isolates })` + `pool.stats()` + `pool.handle({ policy })`
+### `pool.warm()` + `pool.stats()` + `pool.handle({ policy })`
 
 ```ts
-await pool.warm({ isolates: 8 });        // pre-spin 8 V8 isolates
+await pool.warm();                        // absorb DO cold-start (~300–400 ms)
+await pool.warm({ isolates: 8 });         // also pre-spin 8 V8 isolates
 const stats = await pool.stats();         // { topology, fanOutPerLevel, treeDepth, ... }
 const handler = pool.handle({ policy: { kind: 'auth', auth: bearerAuth(token) } });
 return handler(req);                      // HTTP submit-code endpoint
 ```
+
+`autoWarm: true` is the default — the first submit fires `warm()`
+implicitly in parallel with the real dispatch, so most callers never
+need to call `warm()` directly. Use it explicitly when you want to pay
+the cold-start cost at Worker startup rather than on first request.
 
 ### `pool.restrictTo(allowedKeys)` — capability-narrow the bindings
 

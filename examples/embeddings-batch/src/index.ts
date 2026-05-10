@@ -15,13 +15,22 @@
  */
 import { Parallel, type WorkerLoader } from 'cloudflare-parallel';
 
-export { CfpCoordinator, CfpWorkerDO, CfpSubCoord } from 'cloudflare-parallel/durable-objects';
+export {
+  CfpCoordinator,
+  CfpWorkerDO,
+  CfpSubCoord,
+  CfpInProcessCoordinator,
+} from 'cloudflare-parallel/durable-objects';
 
 interface Env {
   LOADER: WorkerLoader;
   CfpCoordinator: DurableObjectNamespace;
   CfpWorkerDO: DurableObjectNamespace;
   CfpSubCoord: DurableObjectNamespace;
+}
+
+interface CtxWithExports extends ExecutionContext {
+  exports?: { CfpInProcessCoordinator?: unknown };
 }
 
 // Synthetic corpus: deterministic per-id text. Production would read
@@ -39,7 +48,7 @@ function corpusDoc(id: number): string {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname !== '/' && url.pathname !== '/embed') {
       return Response.json(
@@ -57,7 +66,14 @@ export default {
     const body = req.method === 'POST' ? ((await req.json().catch(() => ({}))) as { query?: string }) : {};
     const query = body.query ?? 'cloudflare workers';
 
-    const pool = Parallel.pool(env);
+    const pool = Parallel.pool(env, {
+      // Skip the DO hop for size-≤4 fan-outs (e.g. the query embed below).
+      inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
+        | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
+        | undefined,
+      // Colocate freshly-created leaf DOs with this colo.
+      requestColo: (req as Request & { cf?: { colo?: string } }).cf?.colo,
+    });
 
     const t0 = Date.now();
 

@@ -141,6 +141,9 @@ const WORKLOADS: WorkloadConfig[] = [
   {
     workload: 'mandelbrot',
     path: '/workload/mandelbrot',
+    // The bench only needs timings; the iters array is opt-in via
+    // `includeIters: true` (default `false`) and would otherwise hit
+    // the 32 MiB RPC payload cap at N ≥ 256.
     parallelBody: (n) => ({ mode: 'parallel', tiles: n }),
     sequentialSampleBody: (n) => ({ mode: 'sequential-sample', tiles: n }),
     hasSequentialSample: true,

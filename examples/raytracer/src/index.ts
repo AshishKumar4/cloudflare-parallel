@@ -17,7 +17,12 @@
  */
 import { Parallel, type WorkerLoader } from 'cloudflare-parallel';
 
-export { CfpCoordinator, CfpWorkerDO, CfpSubCoord } from 'cloudflare-parallel/durable-objects';
+export {
+  CfpCoordinator,
+  CfpWorkerDO,
+  CfpSubCoord,
+  CfpInProcessCoordinator,
+} from "cloudflare-parallel/durable-objects";
 
 interface Env {
   LOADER: WorkerLoader;

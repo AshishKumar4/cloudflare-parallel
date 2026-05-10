@@ -51,21 +51,34 @@
       <section class="container panel" id="panel-hero">
         <div class="panel-head">
           <h2>① Hero · <code>pool.map</code> over a CPU-bound function</h2>
-          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/tests/prod/test-worker/src/index.ts#L300" target="_blank" rel="noopener">view source</a>
+          <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/tests/prod/test-worker/src/index.ts" target="_blank" rel="noopener">view source</a>
         </div>
         <p class="panel-desc">
-          Each item: a SHA-256 chain (5,000 iterations over a 64-byte buffer).
-          ~80–150&nbsp;ms of CPU per item on the Workers runtime. Pick a fan-out size; the
+          Each item renders one Mandelbrot tile: a horizontal slab of an
+          image at 20,000-iteration depth around the cardioid. Roughly
+          half a second to a few seconds of CPU per tile depending on
+          intensity. Pick a fan-out size and an intensity preset; the
           library picks the topology.
         </p>
         <div class="hero-controls">
-          <span>Fan out across</span>
-          <div class="size-tabs" role="tablist" aria-label="Fan-out size">
-            <button data-size="4" class="size-tab" role="tab">4</button>
-            <button data-size="32" class="size-tab" role="tab">32</button>
-            <button data-size="128" class="size-tab is-active" role="tab" aria-selected="true">128</button>
-            <button data-size="256" class="size-tab" role="tab">256</button>
-            <button data-size="512" class="size-tab" role="tab">512</button>
+          <div class="control-group">
+            <span class="control-label">Fan out across</span>
+            <div class="size-tabs" role="tablist" aria-label="Fan-out size">
+              <button data-size="4" class="size-tab" role="tab">4</button>
+              <button data-size="16" class="size-tab" role="tab">16</button>
+              <button data-size="64" class="size-tab" role="tab">64</button>
+              <button data-size="128" class="size-tab is-active" role="tab" aria-selected="true">128</button>
+              <button data-size="256" class="size-tab" role="tab">256</button>
+              <button data-size="512" class="size-tab" role="tab">512</button>
+            </div>
+          </div>
+          <div class="control-group">
+            <span class="control-label">Intensity</span>
+            <div class="size-tabs" role="tablist" aria-label="Per-task intensity">
+              <button data-intensity="medium" class="size-tab" role="tab" title="Per-tile ~300 ms — speedup visible at N≥64">medium</button>
+              <button data-intensity="heavy" class="size-tab is-active" role="tab" aria-selected="true" title="Per-tile ~700 ms — speedup curve clearly visible">heavy</button>
+              <button data-intensity="extreme" class="size-tab" role="tab" title="Per-tile ~1.5 s — hits 100× at N=512">extreme</button>
+            </div>
           </div>
           <button class="run-btn" id="hero-run">Run fan-out</button>
         </div>
@@ -76,14 +89,19 @@
             <div class="metric-sub" id="hero-fanout">size?</div>
           </div>
           <div class="metric">
-            <div class="metric-label">Wall-clock (parallel)</div>
+            <div class="metric-label">Per-tile CPU</div>
+            <div class="metric-value"><span id="hero-pertile">—</span><span class="unit">ms</span></div>
+            <div class="metric-sub">measured single-tile</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Parallel wall</div>
             <div class="metric-value"><span id="hero-par-ms">—</span><span class="unit">ms</span></div>
             <div class="metric-sub" id="hero-par-detail">—</div>
           </div>
           <div class="metric">
-            <div class="metric-label">Sequential baseline</div>
+            <div class="metric-label">Sequential extrapolated</div>
             <div class="metric-value"><span id="hero-seq-ms">—</span><span class="unit">ms</span></div>
-            <div class="metric-sub">extrapolated from N=32 sample</div>
+            <div class="metric-sub" id="hero-seq-detail">N × per-tile</div>
           </div>
           <div class="metric metric-speedup">
             <div class="metric-label">Speedup</div>
@@ -91,7 +109,30 @@
             <div class="metric-sub" id="hero-isolates">—</div>
           </div>
         </div>
-        <pre class="code"><code id="hero-code">await pool.map(sha256Chain, items)</code></pre>
+        <details class="hero-explainer">
+          <summary>Why doesn't every size beat sequential?</summary>
+          <p>
+            The library's per-call dispatch floor is roughly 50–150 ms
+            (Durable Object RPC + leaf coordination) plus the time to ship
+            N task envelopes across the wire. Speedup is real only when
+            <em>per-task CPU ≫ dispatch floor</em>. At small N (4–16)
+            with the medium preset, per-tile CPU is in the 200–400 ms
+            band — comparable to dispatch — so speedup can land near
+            1×. At N≥64, per-task work starts dominating and speedup
+            climbs sharply. The <strong>heavy</strong> preset crosses
+            5× at N=64 and 50×+ at N=512; <strong>extreme</strong>
+            lands ~100× at N=512.
+          </p>
+          <p class="muted">
+            Tip: the first request after a quiet period pays a one-time
+            ~300–400 ms DO cold-start. The library's <code>autoWarm: true</code>
+            default fires that off in parallel with the first dispatch, so
+            you'll see it absorbed automatically — but the cold curve is
+            still measurably slower than the warm curve. Click a size or
+            intensity tab twice to see the warm-path numbers.
+          </p>
+        </details>
+        <pre class="code"><code id="hero-code">await pool.map(renderMandelbrotTile, slabs)</code></pre>
         <div class="topology-svg" id="hero-svg" aria-hidden="true"></div>
       </section>
 
@@ -250,9 +291,10 @@ await pool.submit(longLoop, iters, { cancel });
           <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/bench-results-live.json" target="_blank" rel="noopener">bench-results-live.json</a>
         </div>
         <p class="panel-desc">
-          The honest curve. Each row: SHA-256-chain over N items, parallel via
-          <code>pool.map</code> vs sequential baseline. Speedup grows with size as the
-          dispatch overhead amortizes; tree topology kicks in at 256.
+          The honest curve. Each row: Mandelbrot tile renders over N
+          parallel V8 isolates vs the sequential per-tile baseline ×N.
+          Speedup grows with size as the per-call dispatch floor
+          amortizes; tree topology kicks in at 256.
         </p>
         <table class="bench-table" id="bench-table">
           <thead>
