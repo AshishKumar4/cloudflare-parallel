@@ -214,9 +214,9 @@ async function runHero(): Promise<void> {
     setText(
       'hero-isolates',
       par.topology === 'in-do'
-        ? `${heroSize} V8 isolates (one DO)`
+        ? `${heroSize} V8 isolate${heroSize === 1 ? '' : 's'} (single-job fast path)`
         : par.topology === 'hybrid'
-          ? `${Math.ceil(heroSize / 4)} leaf DOs × 4 loaders`
+          ? `${heroSize} leaf DO${heroSize === 1 ? '' : 's'} (one job each)`
           : `tree depth ${par.treeDepth} · ${par.fanOutPerLevel.join('·')} fan-out`,
     );
 
@@ -248,18 +248,15 @@ function drawTopologySvg(topology: string, size: number, fanOut: number[], depth
   const stroke = getCss('--border-2');
 
   if (topology === 'in-do') {
-    // 1 DO + 4 loaders inside.
+    // Single loaded isolate, no fan-out.
     svg += `<rect x="${cx - 50}" y="40" width="100" height="40" rx="6" fill="none" stroke="${blue}" stroke-width="2" />`;
     svg += `<text x="${cx}" y="64" text-anchor="middle" fill="${fg}" font-size="13" font-family="monospace">Coordinator</text>`;
-    for (let i = 0; i < 4; i++) {
-      const x = cx - 60 + i * 40;
-      svg += `<circle cx="${x}" cy="130" r="14" fill="${orange}" />`;
-      svg += `<line x1="${cx}" y1="80" x2="${x}" y2="118" stroke="${stroke}" />`;
-    }
-    svg += `<text x="${cx}" y="180" text-anchor="middle" fill="${fg2}" font-size="12" font-family="monospace">4 loaders inside one DO isolate</text>`;
+    svg += `<circle cx="${cx}" cy="130" r="14" fill="${orange}" />`;
+    svg += `<line x1="${cx}" y1="80" x2="${cx}" y2="118" stroke="${stroke}" />`;
+    svg += `<text x="${cx}" y="180" text-anchor="middle" fill="${fg2}" font-size="12" font-family="monospace">one loaded isolate (single-job fast path)</text>`;
   } else if (topology === 'hybrid') {
-    // 1 coord + N leaf DOs × 4 loaders each. Sample at most 8 leaves.
-    const N = Math.ceil(size / 4);
+    // 1 coord + N leaf DOs, one job each. Sample at most 8 leaves visually.
+    const N = size;
     svg += `<rect x="${cx - 50}" y="20" width="100" height="36" rx="6" fill="none" stroke="${blue}" stroke-width="2" />`;
     svg += `<text x="${cx}" y="42" text-anchor="middle" fill="${fg}" font-size="13" font-family="monospace">Coordinator</text>`;
     const shown = Math.min(N, 8);
@@ -269,15 +266,12 @@ function drawTopologySvg(topology: string, size: number, fanOut: number[], depth
       svg += `<line x1="${cx}" y1="56" x2="${lx}" y2="100" stroke="${stroke}" />`;
       svg += `<rect x="${lx - 22}" y="100" width="44" height="22" rx="4" fill="none" stroke="${blue}" stroke-width="1.5" />`;
       svg += `<text x="${lx}" y="115" text-anchor="middle" fill="${fg}" font-size="10" font-family="monospace">leaf</text>`;
-      for (let j = 0; j < 4; j++) {
-        const ox = lx - 18 + j * 12;
-        svg += `<circle cx="${ox}" cy="142" r="4" fill="${orange}" />`;
-      }
+      svg += `<circle cx="${lx}" cy="142" r="5" fill="${orange}" />`;
     }
     if (N > shown) {
       svg += `<text x="${W - 30}" y="115" fill="${fg2}" font-size="11" font-family="monospace">…+${N - shown}</text>`;
     }
-    svg += `<text x="${cx}" y="180" text-anchor="middle" fill="${fg2}" font-size="12" font-family="monospace">${N} leaves × 4 loaders = ${size} parallel V8 isolates</text>`;
+    svg += `<text x="${cx}" y="180" text-anchor="middle" fill="${fg2}" font-size="12" font-family="monospace">${N} leaf DOs, one job each = ${size} parallel V8 isolates</text>`;
   } else if (topology === 'tree') {
     // K-tier tree.
     svg += `<rect x="${cx - 50}" y="14" width="100" height="32" rx="6" fill="none" stroke="${blue}" stroke-width="2" />`;

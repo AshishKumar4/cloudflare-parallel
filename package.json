@@ -1,7 +1,7 @@
 {
   "name": "cloudflare-parallel",
   "version": "0.3.0",
-  "description": "Composed-topology parallel computing for Cloudflare Workers — N child DOs × 4 loaders each = 4N parallel V8 isolates per request, with hierarchical tree scaling beyond.",
+  "description": "Composed-topology parallel computing for Cloudflare Workers — N parallel V8 isolates per request (one job per leaf Durable Object), with hierarchical tree scaling beyond.",
   "type": "module",
   "sideEffects": false,
   "main": "dist/index.js",

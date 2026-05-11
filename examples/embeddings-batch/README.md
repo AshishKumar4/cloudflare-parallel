@@ -14,11 +14,12 @@ not the sum.
 
 - **`pool.map` over a CPU-bound function.** No I/O. Each isolate computes
   its own embedding from scratch — a real doc-corpus indexing shape.
-- **Auto-topology selection.** Try `?n=4` (in-DO), `?n=64` (hybrid 4N),
-  `?n=512` (tree). Read `topology.decision` in the response.
+- **Auto-topology selection.** Try `?n=4` (hybrid, 4 leaf DOs), `?n=64`
+  (tree, root → 8 sub-coords → 8 leaves each), `?n=512` (deeper tree).
+  Read `topology.decision` in the response.
 - **Two `pool` calls compose.** `pool.map(...)` for the corpus + a second
-  `pool.submit(...)` for the query embedding — the small one stays
-  in-DO, the big one fans out.
+  `pool.submit(...)` for the query embedding — the single-shot stays
+  on the in-do fast path, the fan-out spreads across leaf DOs.
 - **Cosine similarity in the parent.** It's cheap; one dot-product per
   doc. The library is for CPU-bound *batches*, not for everything.
 
@@ -34,8 +35,10 @@ curl -s -X POST 'http://localhost:8787/?n=128&k=5' \
      -d '{"query":"cloudflare workers"}' | jq
 ```
 
-You'll get topology = `'hybrid'` and a fanOut shape like `[32, 4, 4, ...]`
-— that's 32 leaf DOs each running 4 loaders = up to 128 parallel embeddings.
+At N=128 you'll get topology = `'tree'` with fanOut `[8, 16]` — root
+coord fans out to 8 sub-coords, each fanning out to 16 leaf DOs. That's
+128 leaf DOs running one embedding each — 128 parallel V8 isolates,
+each on its own workerd process.
 
 ## When NOT to use this pattern
 

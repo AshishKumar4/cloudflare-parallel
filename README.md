@@ -1,6 +1,6 @@
 # cloudflare-parallel
 
-> Composed-topology parallel computing for Cloudflare Workers. **4N parallel V8 isolates per request**, with hierarchical tree scaling beyond.
+> Composed-topology parallel computing for Cloudflare Workers. **N parallel V8 isolates per request** — one job per leaf Durable Object — with hierarchical tree scaling beyond.
 
 [![npm](https://img.shields.io/npm/v/cloudflare-parallel)](https://www.npmjs.com/package/cloudflare-parallel)
 [![CI](https://github.com/AshishKumar4/cloudflare-parallel/actions/workflows/ci.yml/badge.svg)](https://github.com/AshishKumar4/cloudflare-parallel/actions/workflows/ci.yml)
@@ -14,7 +14,11 @@ const pool = Parallel.pool(env);
 
 // Mandelbrot escape-time across 128 image rows. Each isolate computes
 // one row independently. ~15 ms per row of CPU; 128 rows fan out to
-// 32 leaf DOs × 4 loaders = 128 parallel V8 isolates.
+// 128 leaf Durable Objects, each running one row in its own V8 isolate
+// on its own workerd process — that's where the CPU parallelism comes
+// from. The tree topology kicks in past `maxFanOut` (default 32) so a
+// 128-job request becomes a root coordinator → 8 sub-coordinators →
+// 128 leaf DOs.
 const rows = await pool.map((y: number) => {
   const out = new Uint8Array(640);
   for (let x = 0; x < 640; x++) {
@@ -33,7 +37,7 @@ const rows = await pool.map((y: number) => {
 }, Array.from({ length: 128 }, (_, y) => y));
 ```
 
-128 image rows in flight. Up to 32 V8 isolates running concurrently inside one Worker request. No queue, no orchestration code, no infrastructure. The library picks the topology.
+128 image rows in flight, on 128 leaf DOs, each a separate workerd process. No queue, no orchestration code, no infrastructure. The library picks the topology.
 
 ---
 
@@ -41,8 +45,8 @@ const rows = await pool.map((y: number) => {
 
 **This library is for CPU-bound parallelism on Cloudflare Workers.** If you're awaiting I/O (`fetch`, KV reads, AI calls, R2 GETs, D1 queries), `Promise.all` on a single isolate already gives you that — the JavaScript event loop interleaves I/O for free. Where this library shines is offloading **CPU-heavy work** — embeddings, hashing, image transforms, parsing, simulation, codegen — to N parallel V8 isolates so the single-threaded event loop doesn't bottleneck you.
 
-- **4N parallel V8 isolates per request.** Composes Worker Loader + Durable Objects to break past the per-isolate 4-loader cap. `N` leaf DOs × `4` loaders each = `4N` real parallel V8 heaps, each running your code on its own thread of the runtime.
-- **Tree scaling beyond.** Past 256 items the auto-selector promotes to a multi-tier coordinator → sub-coordinator → leaf shape with branching factor `F`. Total isolates `4 · F^K`.
+- **N parallel V8 isolates per request.** Each task in a `pool.map` lands on its own leaf Durable Object — and each leaf DO is its own workerd process with its own V8 scheduler thread. CPU parallelism scales linearly with DO count, not with loaders-per-DO (loaders inside one process share that process's thread and serialize on CPU).
+- **Tree scaling beyond `maxFanOut`.** Once the fan-out exceeds the per-coordinator RPC cap (default 32), the auto-selector promotes to a multi-tier coordinator → sub-coordinator → leaf shape with branching factor `F`. Total leaves `F^K` (depth K, branching F).
 - **Real `AbortSignal` cancellation.** Token cancel propagates end-to-end across the RPC boundary; pending awaits inside the loaded isolate reject with the cancel reason.
 - **Reactive scheduler.** Durable job queue with retries, deadlines, fair per-tenant queueing, idempotency keys.
 - **Live demo:** [cloudflare-parallel-demo.pages.dev](https://cloudflare-parallel-demo.pages.dev) (deployed) · [test worker](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev/health) · [bench numbers](bench-results-live.json).
@@ -125,7 +129,7 @@ interface Env {
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
     const pool = Parallel.pool(env, {
-      // Skip the DO hop for small fan-outs (size ≤ 4) — same-process
+      // Skip the DO hop for single-shot submits — same-process
       // dispatch via the auto-generated `ctx.exports` loopback.
       // https://developers.cloudflare.com/workers/runtime-apis/context/
       inProcess: ctx.exports.CfpInProcessCoordinator,
@@ -199,7 +203,7 @@ const stream = await pool.submitStream((n: number) => {
 const tiles = await pool.map((y: number) => renderRow(y), [0, 1, 2, ..., 191]);
 ```
 
-Auto-topology: ≤4 → `in-do`; 5..256 → `hybrid` (`4N`); >256 → `tree`.
+Auto-topology: 1 → `in-do` (single-isolate fast path); 2..32 → `hybrid` (N leaf DOs, one job each); >32 → `tree` (root → sub-coords → leaves).
 
 ### `pool.mapStream(fn, items, opts?)` — yield results in completion order
 
@@ -362,24 +366,26 @@ export default {
 The selector reads `items.length` and picks one of three shapes:
 
 ```
-size ≤ 4    in-DO         coordinator + 4 loaders inside its isolate
-                          ┌──────────────┐
-                          │ Coordinator  │
-                          │  L L L L     │ 4 loaders × 1 DO = 4 isolates
-                          └──────────────┘
+size = 1            in-DO       single loaded isolate in the Worker process
+                                ┌─────────┐
+                                │  Loader │ ← one V8 isolate, no DO RPC
+                                └─────────┘
 
-5 ≤ size ≤ 16²  hybrid    coordinator + ⌈size/4⌉ leaf DOs × 4 loaders each
-                          ┌──────────────┐
-                          │ Coordinator  │
-                          └───┬────┬─────┘
-                            ┌─┴┐ ┌─┴┐ …    ⌈size/4⌉ leaves
-                            │LL│ │LL│       4 loaders each = 4N isolates
-                            │LL│ │LL│
-                            └──┘ └──┘
+2 ≤ size ≤ K        hybrid      coordinator + N leaf DOs (one job per leaf)
+                                ┌──────────────┐
+                                │ Coordinator  │
+                                └───┬───┬───┬──┘
+                                    │   │   │ …    N = size leaves
+                                  ┌─┴┐ ┌┴┐ ┌┴┐
+                                  │L │ │L│ │L│     one job each — each leaf
+                                  └──┘ └─┘ └─┘     is its own workerd process
 
-size > 256   tree         coordinator → sub-coords → leaves; depth K = ⌈log_F size⌉
-                                                              total = 4·F^K isolates
+size > K            tree        coordinator → sub-coords → leaves; depth
+                                K, branching F. Total leaves = F^K (one
+                                job each).
 ```
+
+Where `K = maxFanOut` (default 32) — the per-coordinator RPC fan-out cap. Each leaf DO is a separate workerd process with its own V8 scheduler thread, so CPU parallelism scales linearly with leaf count.
 
 Read [`DESIGN.md`](DESIGN.md) §4 for the math, ADRs, and the empirical caps that drive the selector.
 
@@ -405,7 +411,7 @@ Mirror the pattern in your own RPC-heavy code: keep one held `RpcTarget` per rem
 
 ### 2. In-process coordinator for small fan-outs
 
-Pass `inProcess: ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` and any fan-out of size ≤ 4. The loopback stays inside the same Worker process — no inter-DO RPC, no cross-region routing — so per-call dispatch drops from tens of milliseconds to ~1–3 ms. Larger fan-outs still flow through the Coordinator DO (which composes 4N parallelism across leaf DOs). [`ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/).
+Pass `inProcess: ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` (and the rare `pool.map([x], fn)` of size = 1). The loopback stays inside the same Worker process — no inter-DO RPC, no cross-region routing — so per-call dispatch drops from tens of milliseconds to ~1–3 ms. Fan-outs of size ≥ 2 flow through the Coordinator DO so each task lands in its own leaf DO process — CPU parallelism only scales across separate workerd processes. [`ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/).
 
 ### 3. Auto-warm of the Coordinator DO
 
@@ -444,22 +450,22 @@ The library publishes live edge benchmarks in [`bench-results-live.json`](bench-
 
 ### Observed speedup curve
 
-Live numbers from the deployed test worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`):
+Live numbers from the deployed test worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`). Numbers are warm (the auto-warm prewarm absorbs the cold-start path) and span the `hybrid` (2..32) and `tree` (>32) topologies. Sequential baseline is the per-tile wall multiplied by N.
 
-| Size | Topology | Per-tile (warm) | Parallel wall (warm) | Speedup |
-|-----:|----------|----------------:|---------------------:|--------:|
-|    4 | `in-do`  |          ~180 ms |               ~890 ms |  ~1×    |
-|   16 | `hybrid` |          ~170 ms |               ~2.7 s  |  ~1×    |
-|   64 | `hybrid` |          ~180 ms |               ~2.8 s  |  ~4×    |
-|  128 | `hybrid` |          ~170 ms |               ~3.0 s  |  ~7×    |
-|  256 | `tree`   |          ~180 ms |               ~3.0 s  | ~15×    |
-|  512 | `tree`   |          ~180 ms |               ~5.4 s  | ~17×    |
+| Size | Topology         | Parallel wall (warm) | Sequential | **Speedup** |
+|-----:|------------------|---------------------:|-----------:|------------:|
+|    4 | `hybrid`         |               552 ms |    1.8 s   |    **3.3×** |
+|   16 | `hybrid`         |               572 ms |    7.2 s   |   **12.6×** |
+|   64 | `tree` `[8,8]`   |              1481 ms |   29.2 s   |   **19.7×** |
+|  128 | `tree` `[8,16]`  |              1470 ms |   52.5 s   |   **35.7×** |
+|  256 | `tree` `[8,32]`  |              1185 ms |  107.8 s   |   **91.0×** |
+|  512 | `tree` (depth 2) |              1457 ms |  210.4 s   |  **144.4×** |
 
-GA (heavy N-body fitness eval) hits **94× at N=512** with `tree` topology (depth=3); Monte Carlo hits **30× at N=256**.
+Heavy N-body GA fitness eval hits **111× at N=512** with depth-2 tree; Monte Carlo dart-throwing hits **63× at N=256**. Full sweep + cold/warm split: [`bench-results-live.json`](bench-results-live.json).
 
-**Why small-N doesn't show 4× speedup.** The Worker Loader caches isolates by ID (per [the public API](https://developers.cloudflare.com/dynamic-workers/api-reference/#get)): concurrent `get(sameId)` calls return the SAME loaded isolate, and tasks run sequentially on that single V8 context. The library's parallelism unlocks at the **leaf-DO tier** — `hybrid` and `tree` topologies fan out across N independent leaf DOs, each with its own isolate. At N ≤ 4 (the `in-do` topology) all tasks share one isolate, so the per-tile CPU sums sequentially even though dispatch is parallel; the library's contribution there is no worse than running inline. To get genuine 4-way parallelism at N=4, pass `freshIsolate: true` per submit — but the per-call loader spin-up usually outweighs the win at that scale.
+**Where parallel CPU comes from.** Each leaf DO is a separate workerd process with its own V8 scheduler thread. The hybrid topology dispatches one job per leaf — N tasks land on N separate processes and execute concurrently. The tree topology recursively splits the fan-out so the per-coordinator RPC cap (default 32) doesn't bottleneck large workloads. Loaders *inside* a single workerd process share that process's V8 thread and serialize on CPU, so the library never bundles multiple jobs into one leaf — only DO count multiplies CPU.
 
-The library shines at **N ≥ 64**: each leaf DO runs its own batch in its own isolate, and the speedup is roughly `N / 4` minus dispatch overhead. At N ≥ 256 the tree topology multiplies leaf count further.
+The library scales close to linear from N=4 upward. At N=4 the ceiling is bounded by per-leaf RPC dispatch overhead vs sequential's single-isolate hot path; from N=16 upward the parallel win dominates dramatically.
 
 ### Cache key strategy
 

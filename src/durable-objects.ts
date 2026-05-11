@@ -20,8 +20,10 @@
  *
  * `CfpInProcessCoordinator` is a `WorkerEntrypoint` (not a Durable
  * Object) — re-exporting it makes it available as a `ctx.exports` loopback
- * binding for small-N submits, dropping dispatch overhead from tens of
- * milliseconds (DO RPC) to a couple of milliseconds (in-process).
+ * binding for single-shot `submit()` calls, dropping dispatch overhead
+ * from tens of milliseconds (DO RPC) to a couple of milliseconds
+ * (in-process). Fan-outs of size ≥ 2 always route through the
+ * Coordinator DO so each task lands in its own leaf DO process.
  *
  * The matching `wrangler.toml` bindings are documented in the project
  * README; run `npx cloudflare-parallel doctor` to scaffold them in an

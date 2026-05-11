@@ -2,27 +2,46 @@
  * Typed AST describing a topology execution plan.
  *
  * The selector returns a `TopologyPlan` for a given `size` and options.
- * Coordinator implementations consume the plan: in-DO walks the leaf shape
- * directly; hybrid dispatches one RPC per leaf entry; tree recursively
+ * Coordinator implementations consume the plan: `in-do` is a single-job
+ * fast path (one loaded isolate in the parent process); `hybrid`
+ * dispatches one RPC per leaf entry to one worker DO; `tree` recursively
  * dispatches sliced plans to sub-coordinators.
  *
- * Goldens for these shapes live in tests/unit/selector.test.ts and
- * tests/unit/topology/plan.test.ts.
+ * **Parallelism model.** Each worker DO runs as its own workerd process
+ * on its own V8 scheduler thread. CPU parallelism therefore scales with
+ * DO count, not with loaders-per-DO. The library dispatches one job per
+ * leaf DO so the per-leaf loader cap is irrelevant; the binding
+ * constraint is the per-coordinator RPC fan-out (default 32).
+ *
+ * Goldens for these shapes live in `tests/unit/selector.test.ts` and
+ * `tests/unit/topology/plan.test.ts`.
  */
 
 export type TopologyName = 'loader-only' | 'in-do' | 'hybrid' | 'tree';
 
 export interface InDoPlan {
   topology: 'in-do';
-  /** size in 1..4. Each entry = one loader to spawn inside the coordinator DO. */
+  /**
+   * size in {0, 1}. Reserved for single-shot `submit()` and empty
+   * `pool.map([], fn)`. Fan-outs of size ≥ 2 route to `hybrid` because
+   * loaders inside a single DO process share its V8 scheduler thread.
+   */
   size: number;
 }
 
 export interface HybridPlan {
   topology: 'hybrid';
-  /** Total number of jobs. Sum of `leafShape`. */
+  /** Total number of jobs. Equal to `leafShape.length`; each leaf gets one job. */
   size: number;
-  /** Per-child-DO loader count. Length = N = ceil(size/4). Each entry ≤ 4. */
+  /**
+   * One entry per leaf DO. Every entry is `1` — the library dispatches
+   * one job per leaf DO so CPU parallelism scales linearly with DO
+   * count. Length = `size`.
+   *
+   * The shape is retained as an array (rather than just `size`) so the
+   * dispatch path doesn't need a special case for "all-ones" and so
+   * sub-coordinators can carve out arbitrary leaf ranges.
+   */
   leafShape: number[];
 }
 
@@ -34,8 +53,9 @@ export interface TreePlan {
   /** Depth K (coordinator tiers above the hybrid leaf). */
   depth: number;
   /**
-   * Recursive children. At the deepest level, each child is a HybridPlan
-   * (the leaf hybrid); above that, each child is a TreePlan with depth K-1.
+   * Recursive children. At the deepest level, each child is a
+   * `HybridPlan` (one leaf DO per job); above that, each child is a
+   * `TreePlan` with depth K-1.
    */
   children: Array<HybridPlan | TreePlan>;
 }
@@ -48,7 +68,7 @@ export interface LoaderOnlyPlan {
 
 export type TopologyPlan = InDoPlan | HybridPlan | TreePlan | LoaderOnlyPlan;
 
-// ---- balanced-fill leaf-shape distribution -----------------------------
+// ---- balanced-fill distribution helper ---------------------------------
 
 /**
  * Distribute `size` jobs across `n` slots as evenly as possible.
@@ -64,16 +84,9 @@ export type TopologyPlan = InDoPlan | HybridPlan | TreePlan | LoaderOnlyPlan;
  *   balancedFill(10, 3)   -> [4, 3, 3]
  *   balancedFill(0, 4)    -> [0, 0, 0, 0]
  *
- * The optional third argument is preserved for backward compatibility with
- * earlier callers that passed a per-slot cap. When supplied, slots are
- * capped at `maxPerSlot` and any overflow throws — i.e. the caller is
- * stating "I expect each slot to receive at most this many". This matches
- * the v0.3 hybrid-leaf usage where slots are 4-loader DOs.
- *
- * Note: callers that want the old "fill 4-at-a-time, last slot gets the
- * remainder" hybrid leaf shape should use {@link fillCapped} instead. The
- * two distributions are intentionally distinct — see DESIGN §4.2 and
- * §4.3.
+ * The optional third argument is preserved as a sanity check for
+ * callers that want to assert each slot stays under some maximum.
+ * Overflow throws so misuse surfaces immediately.
  */
 export function balancedFill(size: number, n: number, maxPerSlot?: number): number[] {
   if (n <= 0) return [];
@@ -89,10 +102,6 @@ export function balancedFill(size: number, n: number, maxPerSlot?: number): numb
   for (let i = 0; i < n; i++) {
     out[i] = base + (i < extras ? 1 : 0);
   }
-  // The cap is a sanity check, not a constraint: with `n * maxPerSlot >=
-  // size` the per-slot value is at most `ceil(size/n)`, which is bounded
-  // by `maxPerSlot` whenever `maxPerSlot >= ceil(size/n)`. Throw on any
-  // overflow so misuse surfaces immediately.
   if (maxPerSlot !== undefined) {
     for (const v of out) {
       if (v > maxPerSlot) {
@@ -106,18 +115,19 @@ export function balancedFill(size: number, n: number, maxPerSlot?: number): numb
 }
 
 /**
+ * @deprecated Pre-redesign helper for the "4 loaders per leaf DO"
+ * topology. Retained for backward compatibility — the current
+ * selector dispatches one job per leaf DO, so the cap-first
+ * distribution is no longer used internally.
+ *
  * Cap-first distribution. Fill `maxPerSlot`-at-a-time from index 0; the
- * last non-zero slot holds the remainder. Used by the hybrid topology to
- * shape per-leaf loader counts — each leaf DO is a 4-loader bucket, and
- * the leaf shape tracks "how many loaders per leaf DO".
+ * last non-zero slot holds the remainder.
  *
  *   fillCapped(17, 5, 4)  -> [4, 4, 4, 4, 1]
  *   fillCapped(20, 5, 4)  -> [4, 4, 4, 4, 4]
  *   fillCapped(10, 3, 4)  -> [4, 4, 2]
- *   fillCapped(128, 32, 4) -> 32 × [4]
  *
- * Throws `RangeError` if `n * maxPerSlot < size` (caller's distribution
- * is impossible at the requested cap).
+ * Throws `RangeError` if `n * maxPerSlot < size`.
  */
 export function fillCapped(size: number, n: number, maxPerSlot: number): number[] {
   if (n <= 0) return [];

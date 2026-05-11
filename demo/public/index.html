@@ -7,7 +7,7 @@
     <title>cloudflare-parallel — live demo</title>
     <meta
       name="description"
-      content="Live, interactive showcase of cloudflare-parallel. CPU-bound parallel computing on Cloudflare Workers. 4N parallel V8 isolates per request."
+      content="Live, interactive showcase of cloudflare-parallel. CPU-bound parallel computing on Cloudflare Workers. N parallel V8 isolates per request, one job per leaf Durable Object."
     />
     <link rel="icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23f6821f'/%3E%3Ctext x='3' y='12' fill='white' font-family='monospace' font-size='10' font-weight='bold'%3EP%3C/text%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev" />
@@ -32,7 +32,7 @@
 
     <main class="main">
       <section class="container hero">
-        <h1>4N parallel V8 isolates per Worker request.</h1>
+        <h1>N parallel V8 isolates per Worker request.</h1>
         <p class="lede">
           Burn CPU across <em>real</em> parallel isolates on Cloudflare Workers.
           Hash, transform, simulate, render, evolve — work that single-threaded
@@ -158,11 +158,11 @@
             </tr>
           </thead>
           <tbody>
-            <tr data-size="4"><td>4</td><td><span class="topo-badge topo-in-do">in-do</span></td><td>1 DO × 4 loaders</td><td>4</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
-            <tr data-size="32"><td>32</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>⌈32/4⌉=8 leaves × 4</td><td>32</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
-            <tr data-size="128"><td>128</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>⌈128/4⌉=32 leaves × 4</td><td>128 (4N)</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
-            <tr data-size="256"><td>256</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=2 tiers, F=8</td><td>4·F²</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
-            <tr data-size="512"><td>512</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=3 tiers, F=8</td><td>4·F³</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="4"><td>4</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>4 leaf DOs (one job each)</td><td>4</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="32"><td>32</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>32 leaf DOs (one job each)</td><td>32</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="128"><td>128</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=1, F=8 (root → 8 sub-coords → 16 leaves each)</td><td>128</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="256"><td>256</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=2, F=8 (root → 8 sub-coords → 32 leaves each)</td><td>256</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="512"><td>512</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=2, F=8 (root → 8 sub-coords → 64 leaves each, capped at maxFanOut)</td><td>512</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
           </tbody>
         </table>
       </section>

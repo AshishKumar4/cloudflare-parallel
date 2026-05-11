@@ -79,13 +79,20 @@ interface DurableObjectStubLike {
 }
 
 /**
- * Loopback target for small-N submits. Same call shape as the DO
- * coordinator, but the runtime keeps the call inside the same Worker
- * process — no DO routing, no Cap'n Proto over the network. Honored when
- * the user supplies `inProcess: ctx.exports.CfpInProcessCoordinator` via
- * {@link PoolOptions}.
+ * Loopback target for the single-job dispatch path
+ * (`ctx.exports.CfpInProcessCoordinator`). Same call shape as the DO
+ * Coordinator, but the runtime keeps the call inside the same Worker
+ * process — no DO routing, no Cap'n Proto over the network. Honored
+ * when the user supplies `inProcess: ctx.exports.CfpInProcessCoordinator`
+ * via {@link PoolOptions}.
+ *
+ * Only `submit()` and `pool.map([x], fn)` (size = 1) use this path.
+ * Fan-outs of size ≥ 2 always route through the Coordinator DO because
+ * CPU parallelism requires one job per leaf DO process — loaders inside
+ * a single workerd process (loopback or otherwise) share that process's
+ * V8 scheduler thread and serialize on CPU.
  */
-const IN_PROCESS_THRESHOLD = 4;
+const IN_PROCESS_THRESHOLD = 1;
 
 /**
  * Public Pool interface — implemented by both {@link Pool} (the production
@@ -390,11 +397,11 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
   }
 
   /**
-   * Pick the dispatch target for a single-shot submit. When the user has
-   * wired up `inProcess: ctx.exports.CfpInProcessCoordinator`, all
-   * `submit(...)` calls and `map`-style fan-outs of size ≤ 4 route through
-   * the loopback (no DO RPC). Otherwise they route through the Coordinator
-   * DO stub.
+   * Pick the dispatch target for a single-shot submit. When the user
+   * has wired up `inProcess: ctx.exports.CfpInProcessCoordinator`,
+   * `submit(...)` calls (and `pool.map` of exactly size = 1) route
+   * through the loopback (no DO RPC). Otherwise they route through the
+   * Coordinator DO stub.
    */
   #runOneTarget(): DurableObjectStubLike {
     if (this.#inProcess) {
@@ -587,6 +594,12 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
             }),
             envelope,
             freshIsolate: opts?.freshIsolate,
+            // Single-shot `submit` uses slot 0 — compatible with the
+            // first slot of a future `map`. Across calls the same
+            // shape+slot reuses one isolate; across tasks in ONE fan-out,
+            // distinct slots produce distinct isolates (see
+            // `src/loader/cache-key.ts` for the full rationale).
+            taskSlot: 0,
             allowList: undefined,
             cancelStream: cancelWriter?.stream,
           }),
@@ -696,12 +709,15 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
    * Apply `fn` to each element of `items` in parallel.
    *
    * The runtime auto-selects topology by `items.length`:
-   * - `≤ 4`: in-DO (single coordinator dispatches all loaders).
-   * - `5–N²` (N=4 cap per DO): hybrid (coordinator + leaf DOs).
-   * - `> N²`: tree (recursive sub-coordinators, depth K = ⌈log₄ size⌉).
+   * - `0..1`: in-DO (single loaded isolate; no fan-out).
+   * - `2..maxFanOut`: hybrid (one job per leaf DO; CPU parallelism
+   *   scales linearly with leaf-DO count).
+   * - `> maxFanOut`: tree (recursive sub-coordinators, depth
+   *   `K = ⌈log_F (size / maxFanOut)⌉`).
    *
-   * Throughput scales with `4N` where N = number of leaf DOs reachable.
-   * See {@link PoolStats.topology} for the decision the pool actually made.
+   * Throughput scales linearly with leaf-DO count because each leaf is
+   * a separate workerd process on its own V8 scheduler thread. See
+   * {@link PoolStats.topology} for the decision the pool actually made.
    *
    * @param fn function applied to each item. Receives `(item, env)`.
    * @param items items to map. Order preserved in the result.

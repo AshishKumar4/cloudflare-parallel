@@ -168,13 +168,16 @@ export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unk
   /**
    * In-process coordinator loopback. Pass
    * `ctx.exports.CfpInProcessCoordinator` here to bypass the Coordinator
-   * Durable Object for small fan-outs (size ≤ 4) and single-shot
-   * `submit` calls. The loopback stays inside the same Worker process,
-   * dropping per-call dispatch overhead from tens of milliseconds (DO RPC)
-   * to a couple of milliseconds (in-process Cap'n Proto).
+   * Durable Object for single-shot `submit()` calls (and the rare
+   * `pool.map([x], fn)` of size = 1). The loopback stays inside the
+   * same Worker process, dropping per-call dispatch overhead from tens
+   * of milliseconds (DO RPC) to a couple of milliseconds (in-process
+   * Cap'n Proto).
    *
-   * Larger fan-outs still flow through the Coordinator DO (which fans out
-   * across leaf DOs to compose 4N parallelism).
+   * Fan-outs of size ≥ 2 always flow through the Coordinator DO so
+   * each task lands in its own leaf DO process. CPU parallelism only
+   * scales across separate workerd processes; loaders inside one
+   * process share its V8 scheduler thread.
    *
    * Reference: https://developers.cloudflare.com/workers/runtime-apis/context/
    */

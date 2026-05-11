@@ -19,8 +19,11 @@ import type { JobStore, PersistedJob } from './job-store';
  * - Runaway loops are bounded by `inFlightLimit`; backpressure surfaces
  *   via `maxQueueDepth` (enqueue throws when exceeded).
  *
- * Throughput: bounded by `inFlightLimit × loader-cap-per-isolate` (=4 from
- * a DO method). The previous alarm-batched design capped at 0.8 jobs/s.
+ * Throughput: bounded by `inFlightLimit` (default 32 in-flight jobs).
+ * Jobs sharing the scheduler DO's V8 thread serialize on CPU but
+ * overlap on I/O; for CPU-heavy work submit via `Parallel.pool` map
+ * fan-outs to spread across leaf DOs. The previous alarm-batched
+ * design capped at 0.8 jobs/s.
  */
 export interface DispatcherConfig {
   inFlightLimit: number;

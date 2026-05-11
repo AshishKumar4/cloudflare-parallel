@@ -72,39 +72,45 @@ const parsed = await pool.map((blob: string) => expensivelyParse(blob), blobs);
 
 Auto-selector picks based on `items.length`:
 
-| Size | Topology | V8 isolates |
+| Size | Topology | Leaf DOs / V8 isolates |
 | --- | --- | --- |
-| ≤ 4 | `in-do` | 4 (one DO, four loaders) |
-| 5..256 | `hybrid` | `4N` where `N = ⌈size/4⌉` |
-| > 256 | `tree` | `4·F^K` (F=8 by default; K = ⌈log_F size⌉) |
+| 1 | `in-do` | one loaded isolate, no fan-out |
+| 2..`maxFanOut` (32) | `hybrid` | `N = size` leaf DOs, one job each |
+| > `maxFanOut` | `tree` | `F^K` leaf DOs (F=8 by default; K = ⌈log_F(size/maxFanOut)⌉) |
 
-The 4N math is the load-bearing claim of this library: spawning N child
-DOs around a parent DO multiplies the per-DO 4-loader cap. See
+The load-bearing claim of this library: **CPU parallelism scales with
+leaf-DO count, because each leaf is its own workerd process with its
+own V8 scheduler thread.** Loaders inside a single process share that
+process's thread and serialize on CPU; we deliberately dispatch one job
+per leaf so the per-leaf thread is dedicated. See
 `docs/architecture.md` for the substrate evidence.
 
 ## Workerd cpuMs cap
 
 Each loaded isolate inherits its own `cpuMs` budget. A 30-second cpu
-budget × 128 isolates ≈ 64 minutes of compute available within a single
+budget × 128 leaf DOs ≈ 64 minutes of compute available within a single
 ~30 s wall-clock Worker request. Use that wisely.
 
 ## Live numbers
 
 The deployed test worker
 ([`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev))
-runs the same SHA-256-chain CPU bench at every topology size. Latest
+runs the same Mandelbrot CPU bench at every topology size. Latest
 numbers in [`bench-results-live.json`](../bench-results-live.json):
 
 ```
-size=4    in-do   speedup ≈ 1x  (dispatch overhead floor)
-size=64   hybrid  speedup ≈ 1.4x
-size=128  hybrid  speedup ≈ 2.2x
-size=256  tree    speedup ≈ 2.6x
-size=512  tree    speedup ≈ 2.4x
+size=1    in-do                    single-isolate dispatch floor (~10 ms)
+size=4    hybrid (4 leaves)        speedup ≈ 3.3×
+size=16   hybrid (16 leaves)       speedup ≈ 12.6×
+size=64   tree [8,8]               speedup ≈ 19.7×
+size=128  tree [8,16]              speedup ≈ 35.7×
+size=256  tree [8,32]              speedup ≈ 91×
+size=512  tree (depth 2)           speedup ≈ 144×
 ```
 
-These are honest numbers. Speedup at small sizes is small because
-dispatch overhead dominates; speedup grows with size because the CPU
-work amortizes the overhead. At very large sizes, tree-RPC overhead
-(K extra hops) starts to bite back. The sweet spot is ~64-256 items at
-≥10 ms per task.
+These are honest numbers, measured warm-of-many on the live edge.
+Speedup at N=4 is bounded by per-leaf RPC dispatch overhead vs
+sequential's single-isolate hot path (≈3× matches the cf-mp-vm
+substrate's `parallel-diff` measurement of 4.07×, modulo library
+overhead). From N=16 upward the parallel win compounds linearly with
+leaf count.

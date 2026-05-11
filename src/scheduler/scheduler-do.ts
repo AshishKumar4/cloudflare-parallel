@@ -27,9 +27,15 @@ const IDLE_ALARM_MS = 60_000;
  *   never for primary dispatch.
  *
  * Throughput: the previous alarm-batched model capped at
- * `MAX_BATCH_PER_ALARM / ALARM_SWEEP_MS = 4 / 5s = 0.8 jobs/s`. This model
- * is bounded only by `inFlightLimit × loader-cap-per-isolate` (=4 from a
- * DO method); default 32 inFlight × 4 ≈ 128 concurrent isolates per DO.
+ * `MAX_BATCH_PER_ALARM / ALARM_SWEEP_MS = 4 / 5s = 0.8 jobs/s`. The
+ * reactive design here is bounded by `inFlightLimit` (default 32),
+ * which is the max number of jobs the scheduler DO will keep in flight
+ * concurrently. Each in-flight job runs in a freshly-loaded isolate on
+ * the scheduler DO's V8 thread; jobs cooperatively yield on I/O so 32
+ * in-flight is a comfortable working set, but CPU-bound jobs serialize
+ * on that one thread. For CPU-heavy workloads, wire the scheduler to
+ * `Parallel.pool` and submit map fan-outs — those spread across leaf
+ * DOs and scale CPU linearly with leaf count.
  */
 export interface SchedulerDOEnv {
   LOADER: WorkerLoader;

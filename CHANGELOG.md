@@ -6,6 +6,99 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (BREAKING — topology redesign: N parallel = N DOs, not 4N)
+
+- **The "4 loaders per leaf DO" model is gone.** The library now
+  dispatches **one job per leaf Durable Object** at every fan-out size
+  ≥ 2. CPU parallelism scales linearly with DO count because each
+  leaf is a separate workerd process with its own V8 scheduler thread.
+  Loaders inside a single workerd process share its V8 thread and
+  serialize on CPU — so the previous "4N math" (`N` leaf DOs × `4`
+  loaders each) was wrong; multiplying loaders within a DO never
+  multiplies CPU. The empirical baseline that drove this redesign:
+  cf-mp-vm's `/b/benchmark?n=4&iters=10000000` measures **4.07×
+  speedup** with the `parallel-diff` pattern (4 DOs, 1 loader each)
+  versus 1.09× with `parallel-same` (1 DO, 4 loaders).
+- **Topology selector rewrite** (`src/topology/selector.ts`):
+  - `size = 0..1` → `in-do` (single-loaded-isolate fast path,
+    no fan-out). Pinning `topology: 'in-do'` at size ≥ 2 now throws
+    `TopologyError` — what used to be a silent serialize is now a
+    loud configuration error.
+  - `size 2..maxFanOut` (default 32) → `hybrid`. Leaf shape is
+    `[1, 1, ..., 1]` (length `N = size`); one job per leaf DO.
+  - `size > maxFanOut` → `tree`. Each tier divides work evenly across
+    `branchingFactor` (default 8) sub-coords; the bottom tier is a
+    hybrid leaf with one job per leaf DO. Depth
+    `K = max(1, ceil(log_F(size / maxFanOut)))`.
+  - `treeThreshold` defaults to `maxFanOut` (was 128) so the
+    auto-selector promotes to tree exactly when a single coordinator
+    would otherwise exceed its outbound RPC fan-out budget. Override
+    both knobs together to keep larger fan-outs flat.
+  - `PER_DO_LOADER_CAP = 4` constant deleted. `fillCapped` helper
+    deprecated (still exported for backward compat; no longer used by
+    the selector).
+- **Coordinator dispatch** (`src/coordinator/coordinator.ts`):
+  - `#dispatchInDo` is now a single-job path — refuses size > 1
+    defensively (the selector should have rejected it first).
+  - Leaf-DO naming is **stable across requests**: `${coordId}-leaf-${i}`
+    (previously included a per-request UUID). Subsequent fan-outs of
+    the same shape now hit warm leaves and skip the ~300–400 ms
+    first-RPC DO creation cost. Warm-of-many wall at N=4 dropped from
+    ~900 ms (sequential-equivalent) to ~300 ms (≈3× speedup, matching
+    the platform-floor measured via raw `parallel-diff`).
+- **Sub-coordinator** (`src/coordinator/sub-coordinator.ts`):
+  - `PER_LEAF = 4` constant deleted from `dispatchHybridLeaf`. The
+    sub-coord dispatches one leaf DO per job; per-request counter
+    removed in favor of stable leaf naming.
+- **CHANGED `fanOutPerLevel`** (`PoolStats`): used to emit
+  `[leafCount, ...perLeafLoaderCounts]` (e.g. `[32, 4, 4, ..., 4]` at
+  size=128); now emits just `[leafCount]` at every hybrid tier and
+  the leaf-tier width at the bottom of the tree (`[8, 16]` at
+  size=128, `[8, 32]` at size=256). The total leaf count is
+  `product(fanOutPerLevel)` of every tier.
+
+### Fixed (cache-key collision — per-task isolate isolation)
+
+- **`taskSlot` plumbing in the cache-key path** (P0): `pool.map`'s
+  default `'stable'` strategy returned the SAME loader key for every
+  task in a fan-out because the key was just `cfp:<hash>` with no
+  per-task differentiator. The Worker Loader's by-key caching collapsed
+  all N concurrent `loader.get(sameKey)` calls onto one shared loaded
+  isolate — distinct tasks ended up sharing the same V8 heap and
+  module-level state, a correctness hazard for any fn that stashes
+  per-call state in a top-level `let` or `Map`.
+  - New `taskSlot?: number` field on `CacheKeyInput`. When present,
+    appends `:slot-<taskSlot>` to the cache key — N distinct keys for
+    N concurrent tasks → N distinct V8 isolates with independent
+    heaps and module state.
+  - **Note.** The slot suffix is an **isolation** primitive. CPU
+    parallelism comes from the redesigned topology above (one job per
+    leaf DO process); the slot keeps each task's isolate independent
+    of every other task's isolate, which matters whenever multiple
+    user fns might land on the same workerd process (e.g. through
+    `LoaderOnlyPool` from a fetch handler).
+  - `taskSlot` is plumbed end-to-end:
+    `pool.{submit,map,scatter,reduce,pmap}` → `runMany` /
+    `runOne` → `CoordinatorFanOutRequest` → `Coordinator.#dispatchInDo`
+    / `#dispatchHybrid` / `#dispatchTree` → `RunBatchRequest.taskSlotBase`
+    / `DispatchTreeRequest.taskSlotBase` → `WorkerDO.runBatch` /
+    `SubCoord.dispatch` → `LoaderRunner.runOne({ taskSlot })` →
+    `buildCacheKey({ taskSlot })`.
+  - Slot indices are GLOBAL across the fan-out: the i-th task in the
+    caller's `argsList` always lands at global slot `i`, regardless of
+    which leaf DO ends up running it. Same task position reliably
+    reuses the same isolate across calls.
+  - Single-shot `submit()` uses slot 0 — compatible with the slot-0
+    isolate of a future `map`.
+  - New regressions:
+    - `tests/unit/cache-key-slot.test.ts` (11 tests) pins the
+      `buildCacheKey` taskSlot semantics: distinct slots → distinct
+      keys, same (fn, slot) across calls → same key, slot suffix
+      applies to `stable` and `auto`, `fresh` ignores it.
+    - `tests/unit/task-slot-dispatch.test.ts` (6 tests) pins that
+      `pool.map(items, fn)` issues N distinct `loader.get` IDs to a
+      fake Worker Loader (4 isolates at N=4).
+
 ### Fixed (audit-findings sweep)
 
 - **`CfpInProcessCoordinator` loader-cap** (P0): the two `LoaderRunner`

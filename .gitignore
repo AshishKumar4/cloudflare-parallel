@@ -12,6 +12,9 @@ coverage/
 # without recursive `file:` copying. Rebuilt by `npm pack` in the
 # scripts/refresh-test-worker-tgz.sh helper.
 tests/prod/test-worker/cloudflare-parallel-pkg.tgz
+# `npm pack` output at the package root (used to update the prod-test
+# worker's local tarball install)
+cloudflare-parallel-*.tgz
 examples/*/node_modules/
 examples/*/dist/
 examples/*/.wrangler/

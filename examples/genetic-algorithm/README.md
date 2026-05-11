@@ -29,8 +29,8 @@ genuinely CPU-heavy and the parallelism wins.
 - **Iterative fan-out.** Each generation is its own `pool.map` call;
   selection + crossover + mutation happen in the parent (cheap, no need
   to fan out).
-- **Hybrid → tree topology.** Try `?pop=256` (hybrid 4N), `?pop=512`
-  (tree). Topology shows in the response.
+- **Hybrid → tree topology.** Try `?pop=32` (hybrid, 32 leaf DOs),
+  `?pop=512` (tree). Topology shows in the response.
 - **Honest history.** The response returns per-generation `bestDistance`
   + `ms` so you can see the convergence curve and the per-gen wall-clock.
 

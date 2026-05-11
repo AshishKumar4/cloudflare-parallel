@@ -1,9 +1,9 @@
 {
   "target": "https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev",
-  "ts": "2026-05-10T22:23:28.566Z",
+  "ts": "2026-05-11T00:58:10.120Z",
   "methodology": {
     "warmupRuns": 2,
-    "samples": 5,
+    "samples": 3,
     "coldDefinition": "first measured run after warmup — captures any per-call dispatch cost not amortized by warmup",
     "warmDefinition": "median of remaining samples after the cold run — steady-state throughput",
     "sequentialDefinition": "per-task wall-clock from a single inline run (sequential-sample mode), multiplied by N",
@@ -26,215 +26,147 @@
     {
       "workload": "mandelbrot",
       "size": 4,
-      "topology": "in-do",
+      "topology": "hybrid",
       "treeDepth": 1,
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 1522,
+      "parallelColdMs": 551,
       "parallelWarmRuns": [
-        1579,
-        1563,
-        1609,
-        1631
+        548,
+        556
       ],
-      "parallelWarmMs": 1594,
-      "parallelOverallMedianMs": 1579,
-      "sequentialExtrapolatedMs": 1684,
-      "speedup": 1.06,
-      "speedupColdParallel": 1.11,
+      "parallelWarmMs": 552,
+      "parallelOverallMedianMs": 551,
+      "sequentialExtrapolatedMs": 1816,
+      "speedup": 3.29,
+      "speedupColdParallel": 3.3,
+      "perTaskSampleMs": 454
+    },
+    {
+      "workload": "mandelbrot",
+      "size": 16,
+      "topology": "hybrid",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        16
+      ],
+      "parallelColdMs": 821,
+      "parallelWarmRuns": [
+        568,
+        576
+      ],
+      "parallelWarmMs": 572,
+      "parallelOverallMedianMs": 576,
+      "sequentialExtrapolatedMs": 7232,
+      "speedup": 12.64,
+      "speedupColdParallel": 8.81,
+      "perTaskSampleMs": 452
+    },
+    {
+      "workload": "mandelbrot",
+      "size": 64,
+      "topology": "tree",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        8,
+        8
+      ],
+      "parallelColdMs": 1237,
+      "parallelWarmRuns": [
+        914,
+        2048
+      ],
+      "parallelWarmMs": 1481,
+      "parallelOverallMedianMs": 1237,
+      "sequentialExtrapolatedMs": 29248,
+      "speedup": 19.75,
+      "speedupColdParallel": 23.64,
+      "perTaskSampleMs": 457
+    },
+    {
+      "workload": "mandelbrot",
+      "size": 128,
+      "topology": "tree",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        8,
+        16
+      ],
+      "parallelColdMs": 1785,
+      "parallelWarmRuns": [
+        1364,
+        1576
+      ],
+      "parallelWarmMs": 1470,
+      "parallelOverallMedianMs": 1576,
+      "sequentialExtrapolatedMs": 52480,
+      "speedup": 35.7,
+      "speedupColdParallel": 29.4,
+      "perTaskSampleMs": 410
+    },
+    {
+      "workload": "mandelbrot",
+      "size": 256,
+      "topology": "tree",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        8,
+        32
+      ],
+      "parallelColdMs": 598,
+      "parallelWarmRuns": [
+        592,
+        1778
+      ],
+      "parallelWarmMs": 1185,
+      "parallelOverallMedianMs": 598,
+      "sequentialExtrapolatedMs": 107776,
+      "speedup": 90.95,
+      "speedupColdParallel": 180.23,
       "perTaskSampleMs": 421
     },
     {
       "workload": "mandelbrot",
-      "size": 16,
-      "topology": "hybrid",
-      "treeDepth": 1,
-      "fanOutPerLevel": [
-        4,
-        4,
-        4,
-        4,
-        4
-      ],
-      "parallelColdMs": 5194,
-      "parallelWarmRuns": [
-        4567,
-        5320,
-        4593,
-        5625
-      ],
-      "parallelWarmMs": 4957,
-      "parallelOverallMedianMs": 5194,
-      "sequentialExtrapolatedMs": 6336,
-      "speedup": 1.28,
-      "speedupColdParallel": 1.22,
-      "perTaskSampleMs": 396
-    },
-    {
-      "workload": "mandelbrot",
-      "size": 64,
-      "topology": "hybrid",
-      "treeDepth": 1,
-      "fanOutPerLevel": [
-        16,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4
-      ],
-      "parallelColdMs": 4878,
-      "parallelWarmRuns": [
-        4942,
-        4145,
-        4447,
-        6843
-      ],
-      "parallelWarmMs": 4695,
-      "parallelOverallMedianMs": 4878,
-      "sequentialExtrapolatedMs": 26880,
-      "speedup": 5.73,
-      "speedupColdParallel": 5.51,
-      "perTaskSampleMs": 420
-    },
-    {
-      "workload": "mandelbrot",
-      "size": 128,
-      "topology": "hybrid",
-      "treeDepth": 1,
-      "fanOutPerLevel": [
-        32,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4
-      ],
-      "parallelColdMs": 5146,
-      "parallelWarmRuns": [
-        5302,
-        6608,
-        6114,
-        4214
-      ],
-      "parallelWarmMs": 5708,
-      "parallelOverallMedianMs": 5302,
-      "sequentialExtrapolatedMs": 50944,
-      "speedup": 8.93,
-      "speedupColdParallel": 9.9,
-      "perTaskSampleMs": 398
-    },
-    {
-      "workload": "mandelbrot",
-      "size": 256,
+      "size": 512,
       "topology": "tree",
       "treeDepth": 2,
       "fanOutPerLevel": [
         8,
         8,
-        1,
-        4
+        8
       ],
-      "parallelColdMs": 4775,
+      "parallelColdMs": 780,
       "parallelWarmRuns": [
-        4490,
-        5836,
-        15809,
-        5346
+        793,
+        2120
       ],
-      "parallelWarmMs": 5591,
-      "parallelOverallMedianMs": 5346,
-      "sequentialExtrapolatedMs": 101632,
-      "speedup": 18.18,
-      "speedupColdParallel": 21.28,
-      "perTaskSampleMs": 397
-    },
-    {
-      "workload": "mandelbrot",
-      "size": 512,
-      "topology": "tree",
-      "treeDepth": 3,
-      "fanOutPerLevel": [
-        8,
-        8,
-        8,
-        1,
-        1
-      ],
-      "parallelColdMs": 16063,
-      "parallelWarmRuns": [
-        16276,
-        3219,
-        5258,
-        22397
-      ],
-      "parallelWarmMs": 10767,
-      "parallelOverallMedianMs": 16063,
-      "sequentialExtrapolatedMs": 203776,
-      "speedup": 18.93,
-      "speedupColdParallel": 12.69,
-      "perTaskSampleMs": 398
+      "parallelWarmMs": 1457,
+      "parallelOverallMedianMs": 793,
+      "sequentialExtrapolatedMs": 210432,
+      "speedup": 144.43,
+      "speedupColdParallel": 269.78,
+      "perTaskSampleMs": 411
     },
     {
       "workload": "montecarlo",
       "size": 4,
-      "topology": "in-do",
+      "topology": "hybrid",
       "treeDepth": 1,
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 19593,
+      "parallelColdMs": 7903,
       "parallelWarmRuns": [
-        19399,
-        19145,
-        18934,
-        19115
+        6664,
+        6613
       ],
-      "parallelWarmMs": 19130,
-      "parallelOverallMedianMs": 19145,
-      "sequentialExtrapolatedMs": 19108,
-      "speedup": 1,
-      "speedupColdParallel": 0.98,
-      "perTaskSampleMs": 4777
+      "parallelWarmMs": 6639,
+      "parallelOverallMedianMs": 6664,
+      "sequentialExtrapolatedMs": 21904,
+      "speedup": 3.3,
+      "speedupColdParallel": 2.77,
+      "perTaskSampleMs": 5476
     },
     {
       "workload": "montecarlo",
@@ -242,333 +174,207 @@
       "topology": "hybrid",
       "treeDepth": 1,
       "fanOutPerLevel": [
-        4,
-        4,
-        4,
-        4,
-        4
+        16
       ],
-      "parallelColdMs": 37117,
+      "parallelColdMs": 8297,
       "parallelWarmRuns": [
-        29715,
-        31928,
-        35266,
-        35614
+        7032,
+        7008
       ],
-      "parallelWarmMs": 33597,
-      "parallelOverallMedianMs": 35266,
-      "sequentialExtrapolatedMs": 78000,
-      "speedup": 2.32,
-      "speedupColdParallel": 2.1,
-      "perTaskSampleMs": 4875
+      "parallelWarmMs": 7020,
+      "parallelOverallMedianMs": 7032,
+      "sequentialExtrapolatedMs": 77696,
+      "speedup": 11.07,
+      "speedupColdParallel": 9.36,
+      "perTaskSampleMs": 4856
     },
     {
       "workload": "montecarlo",
       "size": 64,
-      "topology": "hybrid",
+      "topology": "tree",
       "treeDepth": 1,
       "fanOutPerLevel": [
-        16,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4
+        8,
+        8
       ],
-      "parallelColdMs": 32397,
+      "parallelColdMs": 16135,
       "parallelWarmRuns": [
-        37738,
-        37140,
-        44168,
-        38857
+        13379,
+        13130
       ],
-      "parallelWarmMs": 38298,
-      "parallelOverallMedianMs": 37738,
-      "sequentialExtrapolatedMs": 310656,
-      "speedup": 8.11,
-      "speedupColdParallel": 9.59,
-      "perTaskSampleMs": 4854
+      "parallelWarmMs": 13255,
+      "parallelOverallMedianMs": 13379,
+      "sequentialExtrapolatedMs": 314304,
+      "speedup": 23.71,
+      "speedupColdParallel": 19.48,
+      "perTaskSampleMs": 4911
     },
     {
       "workload": "montecarlo",
       "size": 128,
-      "topology": "hybrid",
+      "topology": "tree",
       "treeDepth": 1,
       "fanOutPerLevel": [
-        32,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4
+        8,
+        16
       ],
-      "parallelColdMs": 34982,
+      "parallelColdMs": 24903,
       "parallelWarmRuns": [
-        35168,
-        34969,
-        37315,
-        37835
+        20173,
+        19949
       ],
-      "parallelWarmMs": 36242,
-      "parallelOverallMedianMs": 35168,
-      "sequentialExtrapolatedMs": 631424,
-      "speedup": 17.42,
-      "speedupColdParallel": 18.05,
-      "perTaskSampleMs": 4933
+      "parallelWarmMs": 20061,
+      "parallelOverallMedianMs": 20173,
+      "sequentialExtrapolatedMs": 617344,
+      "speedup": 30.77,
+      "speedupColdParallel": 24.79,
+      "perTaskSampleMs": 4823
     },
     {
       "workload": "montecarlo",
       "size": 256,
       "topology": "tree",
-      "treeDepth": 2,
+      "treeDepth": 1,
       "fanOutPerLevel": [
         8,
-        8,
-        1,
-        4
+        32
       ],
-      "parallelColdMs": 36645,
+      "parallelColdMs": 24100,
       "parallelWarmRuns": [
-        37992,
-        43745,
-        54149,
-        38600
+        19483,
+        19681
       ],
-      "parallelWarmMs": 41173,
-      "parallelOverallMedianMs": 38600,
-      "sequentialExtrapolatedMs": 1235456,
-      "speedup": 30.01,
-      "speedupColdParallel": 33.71,
-      "perTaskSampleMs": 4826
+      "parallelWarmMs": 19582,
+      "parallelOverallMedianMs": 19681,
+      "sequentialExtrapolatedMs": 1228544,
+      "speedup": 62.74,
+      "speedupColdParallel": 50.98,
+      "perTaskSampleMs": 4799
     },
     {
       "workload": "ga",
       "size": 4,
-      "topology": "in-do",
+      "topology": "hybrid",
       "treeDepth": 1,
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 2644,
+      "parallelColdMs": 1787,
       "parallelWarmRuns": [
-        2528,
-        2751,
-        2668,
-        2702
+        2201,
+        2308
       ],
-      "parallelWarmMs": 2685,
-      "parallelOverallMedianMs": 2668,
-      "sequentialExtrapolatedMs": 4956,
-      "speedup": 1.85,
-      "speedupColdParallel": 1.87,
+      "parallelWarmMs": 2255,
+      "parallelOverallMedianMs": 2201,
+      "sequentialExtrapolatedMs": 5248,
+      "speedup": 2.33,
+      "speedupColdParallel": 2.94,
+      "perTaskSampleMs": 1312
+    },
+    {
+      "workload": "ga",
+      "size": 16,
+      "topology": "hybrid",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        16
+      ],
+      "parallelColdMs": 1975,
+      "parallelWarmRuns": [
+        2125,
+        1965
+      ],
+      "parallelWarmMs": 2045,
+      "parallelOverallMedianMs": 1975,
+      "sequentialExtrapolatedMs": 21216,
+      "speedup": 10.37,
+      "speedupColdParallel": 10.74,
+      "perTaskSampleMs": 1326
+    },
+    {
+      "workload": "ga",
+      "size": 64,
+      "topology": "tree",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        8,
+        8
+      ],
+      "parallelColdMs": 3310,
+      "parallelWarmRuns": [
+        2881,
+        2725
+      ],
+      "parallelWarmMs": 2803,
+      "parallelOverallMedianMs": 2881,
+      "sequentialExtrapolatedMs": 83392,
+      "speedup": 29.75,
+      "speedupColdParallel": 25.19,
+      "perTaskSampleMs": 1303
+    },
+    {
+      "workload": "ga",
+      "size": 128,
+      "topology": "tree",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        8,
+        16
+      ],
+      "parallelColdMs": 5069,
+      "parallelWarmRuns": [
+        4886,
+        4797
+      ],
+      "parallelWarmMs": 4842,
+      "parallelOverallMedianMs": 4886,
+      "sequentialExtrapolatedMs": 161280,
+      "speedup": 33.31,
+      "speedupColdParallel": 31.82,
+      "perTaskSampleMs": 1260
+    },
+    {
+      "workload": "ga",
+      "size": 256,
+      "topology": "tree",
+      "treeDepth": 1,
+      "fanOutPerLevel": [
+        8,
+        32
+      ],
+      "parallelColdMs": 5541,
+      "parallelWarmRuns": [
+        4583,
+        4337
+      ],
+      "parallelWarmMs": 4460,
+      "parallelOverallMedianMs": 4583,
+      "sequentialExtrapolatedMs": 317184,
+      "speedup": 71.12,
+      "speedupColdParallel": 57.24,
       "perTaskSampleMs": 1239
     },
     {
       "workload": "ga",
-      "size": 16,
-      "topology": "hybrid",
-      "treeDepth": 1,
-      "fanOutPerLevel": [
-        4,
-        4,
-        4,
-        4,
-        4
-      ],
-      "parallelColdMs": 6369,
-      "parallelWarmRuns": [
-        7775,
-        7396,
-        8369,
-        5886
-      ],
-      "parallelWarmMs": 7586,
-      "parallelOverallMedianMs": 7396,
-      "sequentialExtrapolatedMs": 20176,
-      "speedup": 2.66,
-      "speedupColdParallel": 3.17,
-      "perTaskSampleMs": 1261
-    },
-    {
-      "workload": "ga",
-      "size": 64,
-      "topology": "hybrid",
-      "treeDepth": 1,
-      "fanOutPerLevel": [
-        16,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4
-      ],
-      "parallelColdMs": 8417,
-      "parallelWarmRuns": [
-        7872,
-        9477,
-        9561,
-        7645
-      ],
-      "parallelWarmMs": 8675,
-      "parallelOverallMedianMs": 8417,
-      "sequentialExtrapolatedMs": 83392,
-      "speedup": 9.61,
-      "speedupColdParallel": 9.91,
-      "perTaskSampleMs": 1303
-    },
-    {
-      "workload": "ga",
-      "size": 128,
-      "topology": "hybrid",
-      "treeDepth": 1,
-      "fanOutPerLevel": [
-        32,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4,
-        4
-      ],
-      "parallelColdMs": 9466,
-      "parallelWarmRuns": [
-        13155,
-        7305,
-        8202,
-        9257
-      ],
-      "parallelWarmMs": 8730,
-      "parallelOverallMedianMs": 9257,
-      "sequentialExtrapolatedMs": 161024,
-      "speedup": 18.44,
-      "speedupColdParallel": 17.01,
-      "perTaskSampleMs": 1258
-    },
-    {
-      "workload": "ga",
-      "size": 256,
+      "size": 512,
       "topology": "tree",
       "treeDepth": 2,
       "fanOutPerLevel": [
         8,
         8,
-        1,
-        4
+        8
       ],
-      "parallelColdMs": 10107,
+      "parallelColdMs": 5145,
       "parallelWarmRuns": [
-        10208,
-        10553,
-        10261,
-        9328
+        5919,
+        5938
       ],
-      "parallelWarmMs": 10235,
-      "parallelOverallMedianMs": 10208,
-      "sequentialExtrapolatedMs": 333568,
-      "speedup": 32.59,
-      "speedupColdParallel": 33,
-      "perTaskSampleMs": 1303
-    },
-    {
-      "workload": "ga",
-      "size": 512,
-      "topology": "tree",
-      "treeDepth": 3,
-      "fanOutPerLevel": [
-        8,
-        8,
-        8,
-        1,
-        1
-      ],
-      "parallelColdMs": 7832,
-      "parallelWarmRuns": [
-        6089,
-        6860,
-        24691,
-        6908
-      ],
-      "parallelWarmMs": 6884,
-      "parallelOverallMedianMs": 6908,
-      "sequentialExtrapolatedMs": 649728,
-      "speedup": 94.38,
-      "speedupColdParallel": 82.96,
-      "perTaskSampleMs": 1269
+      "parallelWarmMs": 5929,
+      "parallelOverallMedianMs": 5919,
+      "sequentialExtrapolatedMs": 657408,
+      "speedup": 110.88,
+      "speedupColdParallel": 127.78,
+      "perTaskSampleMs": 1284
     }
   ]
 }

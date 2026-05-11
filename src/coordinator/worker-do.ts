@@ -8,20 +8,23 @@ import { forkCancelStream } from '../transport/cancel-stream';
 /**
  * `CfpWorkerDO` — Hybrid-topology leaf.
  *
- * Receives a `RunBatchRequest` describing 1..4 jobs and runs each via
- * `env.LOADER.get(...)`. The DO's V8 isolate has its own per-isolate
- * concurrent-loader budget (cap=4 from a DO method, empirical caps).
- *
- * Each leaf RPC is independent of any other leaf: the parent Coordinator
- * fan-outs across N leaves and N's loader budgets compose to 4N.
+ * Receives a `RunBatchRequest` carrying the work for one leaf and runs
+ * each item via `env.LOADER.get(...)`. The auto-selector dispatches one
+ * job per leaf so the per-DO V8 thread is dedicated to a single
+ * user-fn at a time; that's where CPU parallelism comes from (each
+ * leaf is its own workerd process). Callers that drive `runBatch`
+ * directly may pass more than one item — the DO still runs them, but
+ * the per-DO loader cap (cap=4 from a DO method, an empirical workerd
+ * limit) bounds the in-flight count and any surplus jobs serialize on
+ * the DO's V8 thread.
  *
  * **Promise pipelining.** Callers can obtain a long-lived
  * {@link WorkerDOSession} via `stub.openSession()` and chain
  * `runBatch(...)` calls on the session without awaiting between calls. The
- * runtime's RPC pipeline (Cap'n Proto promise pipelining) collapses chained
- * calls on the same session into a single round-trip. The Coordinator
- * uses this for hybrid/tree fan-out so each leaf DO is exercised through
- * a single Cap'n Proto session per request.
+ * runtime's RPC pipeline (Cap'n Proto promise pipelining) collapses
+ * chained calls on the same session into a single round-trip. The
+ * Coordinator uses this for hybrid/tree fan-out so each leaf DO is
+ * exercised through a single Cap'n Proto session per request.
  *
  * Reference: https://developers.cloudflare.com/workers/runtime-apis/rpc/
  */
@@ -108,12 +111,19 @@ async function runBatchOnEnv(
     ),
   });
 
-  // Fork the upstream cancel stream so each of the 4 in-DO loaders gets
-  // its own single-reader copy. Live cancel propagates to all of them.
+  // Fork the upstream cancel stream so each in-DO job gets its own
+  // single-reader copy. Live cancel propagates to all in-flight jobs.
   const childStreams = forkCancelStream(request.cancelStream, request.argsList.length);
 
-  // The 4-loader cap is enforced by `LoaderRunner` (semaphore) — we can
-  // safely Promise.all here; the semaphore queues anything beyond cap.
+  // Global slot base for this leaf — supplied by the coordinator so the
+  // i-th task in this batch maps to global slot `slotBase + i`. Distinct
+  // global slots produce distinct loader cache keys, which is what
+  // unlocks per-task isolate parallelism (see `cache-key.ts`).
+  const slotBase = request.taskSlotBase ?? 0;
+
+  // The per-DO-method loader cap is enforced by `LoaderRunner`'s
+  // semaphore — we can safely Promise.all here even if a caller passes
+  // an oversized argsList; the semaphore queues anything beyond cap.
   const results = await Promise.all(
     request.argsList.map(async (args, i) => {
       try {
@@ -132,6 +142,8 @@ async function runBatchOnEnv(
           },
           args,
           freshIsolate: request.freshIsolate,
+          // Global slot index — see slotBase comment above.
+          taskSlot: slotBase + i,
           cancelStream: childStreams[i],
         });
         return { ok: true as const, value };

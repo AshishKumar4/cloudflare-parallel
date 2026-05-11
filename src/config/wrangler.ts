@@ -7,7 +7,7 @@
 export interface ScaffoldNeeds {
   /** Whether the user calls Parallel.pool / actor / vm (any non-loader-only path). */
   needsCoordinator: boolean;
-  /** Whether they use map/scatter/etc. above size 4 (or topology pinned 'hybrid'/'tree'). */
+  /** Whether they use map/scatter/etc. with size ≥ 2 (or topology pinned 'hybrid'/'tree'). */
   needsWorkerDO: boolean;
   needsSubCoord: boolean;
   needsScheduler: boolean;
@@ -16,8 +16,8 @@ export interface ScaffoldNeeds {
   /**
    * Whether to scaffold the in-process coordinator. Recommended on by
    * default — adding `CfpInProcessCoordinator` and the
-   * `enable_ctx_exports` compatibility flag drops the small-N (≤ 4)
-   * dispatch floor from a DO RPC hop to an in-process call.
+   * `enable_ctx_exports` compatibility flag drops the single-shot
+   * `submit()` dispatch floor from a DO RPC hop to an in-process call.
    */
   needsInProcess?: boolean;
   /** Optional binding name override (default `LOADER`). */

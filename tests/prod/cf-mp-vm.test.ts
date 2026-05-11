@@ -1,19 +1,25 @@
 /**
  * Live prod tests against the cf-mp-vm reference worker
- * (https://cf-mp-vm.ashishkumarsingh.com) — the empirical baseline our
- * 4N math is calibrated against.
+ * (https://cf-mp-vm.ashishkumarsingh.com) — the empirical baseline
+ * the library's topology model is calibrated against.
  *
  * These tests do NOT exercise the `cloudflare-parallel` library shape;
- * they validate the *substrate* (Worker Loader + DO loader semaphore)
- * still has the empirical caps documented in DESIGN §2 and our
- * topology selector relies on:
+ * they validate the *substrate* (Worker Loader + per-isolate caps + DO
+ * fan-out parallelism) still behaves as the topology selector
+ * assumes:
  *
  *   - `/a/benchmark` (loader-only, from Worker fetch handler) caps at 3
  *     concurrent loaders.
- *   - `/b/benchmark` (DO method) caps at 4 concurrent loaders.
+ *   - `/b/benchmark` (DO method) caps at 4 concurrent loaders. Per-DO
+ *     V8 thread serializes work inside one DO process — this is why
+ *     the library dispatches one job per leaf DO instead of bundling.
+ *   - `/b/benchmark?mode=parallel-diff` at N=4 measures ~4× speedup
+ *     (one job per DO, N distinct DOs) versus ~1× with
+ *     `mode=parallel-same` (4 loaders in one DO). This is the
+ *     load-bearing empirical claim that drives the topology design.
  *   - `/a/lru-probe` exhibits 50/owner LRU eviction.
- *   - With `mode=parallel-diff` and `n` distinct codeKeys, `uniqueIsolates`
- *     equals min(n, owner cap).
+ *   - With `mode=parallel-diff` and `n` distinct codeKeys,
+ *     `uniqueIsolates` equals min(n, owner cap).
  *
  * If ANY of these break, the topology selector's assumptions break, and
  * we want to know before users do.
@@ -80,7 +86,7 @@ describe('cf-mp-vm substrate', () => {
     expect(r.uniqueIsolates).toBeGreaterThanOrEqual(3);
   }, 30_000);
 
-  it('do+loader (/b) parallel-diff with n=4: hits the 4-loader DO cap', async () => {
+  it('do+loader (/b) parallel-diff with n=4: 4 distinct isolates across 4 DOs', async () => {
     const r = await fetchJson<BBenchResult>(
       `${BASE}/b/benchmark?n=4&iters=1000&mode=parallel-diff`,
     );
@@ -115,9 +121,10 @@ describe('cf-mp-vm substrate', () => {
 
   it('worker-fetch loader cap: n=8 distinct loaders saturates at 3 concurrent', async () => {
     // Substrate empirical bound: a Worker fetch handler can dispatch
-    // at most 3 concurrent loader calls. Our 4N math relies on this —
-    // it's why /b (DO method, cap=4) gives more parallelism per leaf
-    // than /a. Validate by failing in the expected way at n=8.
+    // at most 3 concurrent loader calls. This is why the library
+    // prefers DO-backed dispatch (via the Coordinator + leaf DOs)
+    // over the LoaderOnlyPool path. Validate by failing in the
+    // expected way at n=8.
     const r = await fetchJson<ABenchResult>(
       `${BASE}/a/benchmark?n=8&iters=1000&mode=parallel-diff`,
     );
@@ -164,10 +171,10 @@ describe('cf-mp-vm substrate', () => {
   }, 120_000);
 
   it('CPU-bound parallel scales beyond n=4 (cf-mp-vm reference caps at 32)', async () => {
-    // At n=8 / n=16 / n=32, cf-mp-vm's reference fan-out exceeds the
-    // 4-loader-per-DO cap by spinning up multiple DOs. We verify the
-    // speedup stays high — the topology selector in our library uses
-    // exactly this asymmetry. Take best-of-3 to dampen network jitter.
+    // At n=8 / n=16 / n=32, cf-mp-vm's reference fan-out spreads work
+    // across N distinct DOs (one job per DO — same pattern the library
+    // hybrid topology uses). We verify the speedup stays high. Take
+    // best-of-3 to dampen network jitter.
     const samples: number[] = [];
     let lastUnique = 0;
     for (let i = 0; i < 3; i++) {

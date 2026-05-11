@@ -10,7 +10,14 @@ import { marshalError } from '../transport/error-marshal';
 
 export interface LoaderRunnerOptions {
   loader: WorkerLoader;
-  /** Where this runner is being called from (governs the per-isolate cap). */
+  /**
+   * Where this runner is being called from. Governs the per-isolate
+   * concurrent-loader cap (cap=3 from a fetch handler, cap=4 from a
+   * DO method). In the redesigned topology each leaf DO runs one
+   * job at a time, so the cap is rarely binding — but the semaphore
+   * still queues defensively if a caller drives `runBatch` with a
+   * larger argsList.
+   */
   callSite: CallSiteKind;
   /** Cache-key strategy. */
   cacheKeyStrategy: CacheKeyStrategy;
@@ -35,6 +42,14 @@ export interface RunOneInput {
   args: unknown[];
   /** Per-submission opt-in to a fresh isolate. */
   freshIsolate?: boolean;
+  /**
+   * Task slot index within a single fan-out (0..N-1). Differentiates
+   * concurrent isolates within ONE fan-out so they don't all collide on
+   * one `loader.get(sameKey)` cache hit; preserves warm reuse across
+   * calls because the same slot index always maps to the same isolate.
+   * See `buildCacheKey` for the full rationale and POC validation.
+   */
+  taskSlot?: number;
   /**
    * Live cancel transport. When provided, the runner installs this stream
    * as `env.cancelStream` on the loaded isolate. The loaded isolate reads
@@ -87,6 +102,7 @@ export class LoaderRunner {
         contextHash: input.context ? hashSource(canonicalizeContext(input.context)) : '',
         strategy: this.#opts.cacheKeyStrategy,
         forceFresh: input.freshIsolate,
+        taskSlot: input.taskSlot,
       });
 
       const sanitizedBindings = sanitizeBindings(input.bindings, this.#opts.allowList);

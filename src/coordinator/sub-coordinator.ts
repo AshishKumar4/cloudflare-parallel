@@ -52,7 +52,6 @@ interface SubCoordSessionLike {
 export class SubCoordSession extends RpcTarget {
   readonly #env: SubCoordEnv;
   readonly #ownerId: string;
-  #counter = 0;
 
   constructor(env: SubCoordEnv, ownerId: string) {
     super();
@@ -61,14 +60,14 @@ export class SubCoordSession extends RpcTarget {
   }
 
   async dispatch(request: DispatchTreeRequest): Promise<DispatchTreeResult> {
-    const reqIdx = ++this.#counter;
-    return dispatchOnEnv(this.#env, this.#ownerId, reqIdx, request);
+    // Stable leaf naming — see `CfpCoordinator.runMany` for the
+    // warm-leaf rationale. `reqIdx = 0` keeps the leaf-name template
+    // deterministic across dispatch calls so warm DOs are reused.
+    return dispatchOnEnv(this.#env, this.#ownerId, 0, request);
   }
 }
 
 export class CfpSubCoord extends DurableObject<SubCoordEnv> {
-  #requestCounter = 0;
-
   /**
    * Open a pipelinable session. Subsequent `dispatch(...)` calls invoked
    * on the returned target ride the same RPC session (Cap'n Proto promise
@@ -80,8 +79,7 @@ export class CfpSubCoord extends DurableObject<SubCoordEnv> {
 
   /** Direct call form (kept for callers that don't need pipelining). */
   async dispatch(request: DispatchTreeRequest): Promise<DispatchTreeResult> {
-    const reqIdx = ++this.#requestCounter;
-    return dispatchOnEnv(this.env, this.ctx.id.toString(), reqIdx, request);
+    return dispatchOnEnv(this.env, this.ctx.id.toString(), 0, request);
   }
 
   /**
@@ -102,12 +100,21 @@ async function dispatchOnEnv(
   request: DispatchTreeRequest,
 ): Promise<DispatchTreeResult> {
   const { argsList, planChildSizes, depth, branchingFactor } = request;
+  // Global slot offset for this sub-coord's slice — propagated down from
+  // the parent coordinator. Each child gets `parentSlotBase + sliceOffset`
+  // so the leaf-tier sees the SAME global slot indices the caller's
+  // `pool.map` saw at indices [taskSlotBase, taskSlotBase + size).
+  const parentSlotBase = request.taskSlotBase ?? 0;
 
-  // Slice argsList per child according to planChildSizes.
+  // Slice argsList per child according to planChildSizes, tracking the
+  // running cursor for the global slot space.
   let cursor = 0;
-  const slices: unknown[][][] = [];
+  const slices: Array<{ args: unknown[][]; slotBase: number }> = [];
   for (const childSize of planChildSizes) {
-    slices.push(argsList.slice(cursor, cursor + childSize));
+    slices.push({
+      args: argsList.slice(cursor, cursor + childSize),
+      slotBase: parentSlotBase + cursor,
+    });
     cursor += childSize;
   }
 
@@ -115,12 +122,23 @@ async function dispatchOnEnv(
   const childCancelStreams = forkCancelStream(request.cancelStream, slices.length);
 
   // Dispatch each child in parallel.
-  const childPromises = slices.map(async (slice, i): Promise<RunOneResult[]> => {
+  const childPromises = slices.map(async ({ args: slice, slotBase }, i): Promise<RunOneResult[]> => {
     if (slice.length === 0) return [];
     try {
       if (depth <= 1) {
-        // Hybrid leaf: ceil(slice/4) WorkerDOs × 4 loaders each.
-        return await dispatchHybridLeaf(env, ownerId, request, slice, i, reqIdx, childCancelStreams[i]);
+        // Hybrid leaf: one worker DO per job. CPU parallelism scales
+        // with leaf-DO count because each leaf runs in its own
+        // workerd process / V8 scheduler thread.
+        return await dispatchHybridLeaf(
+          env,
+          ownerId,
+          request,
+          slice,
+          slotBase,
+          i,
+          reqIdx,
+          childCancelStreams[i],
+        );
       } else {
         // Recurse into a deeper sub-coord with promise pipelining.
         const nextChildSizes = balancedFillForTree(slice.length, branchingFactor);
@@ -132,6 +150,8 @@ async function dispatchOnEnv(
           argsList: slice,
           planChildSizes: nextChildSizes,
           depth: depth - 1,
+          // Propagate the global slot base into the next tier.
+          taskSlotBase: slotBase,
           cancelStream: childCancelStreams[i],
         });
         return result.results;
@@ -154,22 +174,20 @@ async function dispatchHybridLeaf(
   ownerId: string,
   request: DispatchTreeRequest,
   slice: unknown[][],
+  sliceSlotBase: number,
   sliceIdx: number,
   reqIdx: number,
   cancelStream: ReadableStream<Uint8Array> | undefined,
 ): Promise<RunOneResult[]> {
-  const PER_LEAF = 4;
-  const numWorkers = Math.ceil(slice.length / PER_LEAF);
-  const leafBatches: unknown[][][] = [];
-  let c = 0;
-  for (let i = 0; i < numWorkers && c < slice.length; i++) {
-    const here = Math.min(PER_LEAF, slice.length - c);
-    leafBatches.push(slice.slice(c, c + here));
-    c += here;
-  }
+  // One leaf DO per job — each leaf is a separate workerd process with
+  // its own V8 scheduler thread. CPU parallelism scales linearly with
+  // leaf count.
+  const leafBatches: Array<{ args: unknown[][]; slotBase: number }> = slice.map(
+    (args, i) => ({ args: [args], slotBase: sliceSlotBase + i }),
+  );
   const leafCancelStreams = forkCancelStream(cancelStream, leafBatches.length);
   const leafResults = await Promise.all(
-    leafBatches.map(async (batch, leafIdx): Promise<RunOneResult[]> => {
+    leafBatches.map(async ({ args: batch, slotBase }, leafIdx): Promise<RunOneResult[]> => {
       const stub = getStub<WorkerDOStub>(
         env.CfpWorkerDO,
         `${ownerId}-r${reqIdx}-leaf-${sliceIdx}-${leafIdx}`,
@@ -187,6 +205,10 @@ async function dispatchHybridLeaf(
           argsList: batch,
           envelope: request.envelope,
           freshIsolate: false,
+          // Global slot offset for this leaf. With one job per leaf
+          // `batch.length === 1`, but the indexing is preserved for
+          // multi-job batches (e.g. callers driving `runBatch` directly).
+          taskSlotBase: slotBase,
           cancelStream: leafCancelStreams[leafIdx],
         });
         return result.results;

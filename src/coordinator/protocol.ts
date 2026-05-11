@@ -29,6 +29,18 @@ export interface RunOneRequest {
   context?: Record<string, unknown>;
   freshIsolate?: boolean;
   cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
+  /**
+   * Task slot index within a single fan-out (0..N-1). Differentiates
+   * concurrent isolates within ONE fan-out so they don't all collide on
+   * one shared loaded isolate. Stable across calls (slot-0 stays
+   * slot-0 next time), distinct within ONE fan-out (slot-0 ≠ slot-1).
+   *
+   * Single-shot `submit` calls pass `taskSlot: 0` so they share the
+   * same isolate as `slot-0` in a future `map` — compatible reuse.
+   *
+   * See `src/loader/cache-key.ts` for the full rationale.
+   */
+  taskSlot?: number;
   /** Wire-level workerOptions overrides. */
   workerOptions?: {
     compatibilityDate?: string;
@@ -67,6 +79,14 @@ export interface RunBatchRequest {
   argsList: unknown[][];
   envelope: DispatchEnvelope;
   freshIsolate?: boolean;
+  /**
+   * Slot index of the FIRST task in this batch — global across the fan-out.
+   * Leaf-0 receives `taskSlotBase: 0`, leaf-1 receives `taskSlotBase:
+   * <leaf-0.size>`, and so on, so the i-th task in this batch maps to
+   * `taskSlot: taskSlotBase + i` in the leaf's `LoaderRunner.runOne`
+   * dispatch. Global slots ensure stable isolate reuse across calls.
+   */
+  taskSlotBase?: number;
   /** See RunOneRequest.cancelStream. Forwarded into each leaf's env. */
   cancelStream?: ReadableStream<Uint8Array>;
 }
@@ -116,6 +136,13 @@ export interface DispatchTreeRequest {
   /** Max fan-out per coordinator level. */
   maxFanOut: number;
   envelope: DispatchEnvelope;
+  /**
+   * Slot index of the FIRST task in this slice — global across the
+   * entire fan-out. Propagates down the tree so the leaf DO knows
+   * which global slot each of its tasks maps to. See
+   * `RunBatchRequest.taskSlotBase` for the rationale.
+   */
+  taskSlotBase?: number;
   /** See RunOneRequest.cancelStream. Forwarded down the tree. */
   cancelStream?: ReadableStream<Uint8Array>;
   /**

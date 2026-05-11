@@ -9,7 +9,7 @@ either drawn from there or measured empirically against deployed Workers.
 
 ### Goals
 
-1. **Absolute maximum parallelism** within Cloudflare's runtime constraints. The composed-topology math (the loader-cap × DO fan-out composition: N child DOs × 4 loaders each = 4N parallel isolates) is the design driver. Hierarchical tree extends 4N to 4 × F^K for branching factor F and K tiers.
+1. **Absolute maximum parallelism** within Cloudflare's runtime constraints. The composed-topology math is **one job per leaf Durable Object** — each leaf DO is its own workerd process with its own V8 scheduler thread, so CPU parallelism scales linearly with DO count. The hybrid topology dispatches `N` leaves at sizes up to `maxFanOut`; the tree topology extends to `F^K` leaves for branching factor `F` and depth `K` once `N > maxFanOut`. Loaders inside one workerd process share its V8 thread and do **not** multiply CPU — distinct cache keys still give per-task isolation (independent heaps, independent module state), but CPU parallelism is a property of process count, not loader count.
 2. **Pleasant, type-safe ergonomic** for the common case. `pool.submit(fn, ...args)` / `pool.map(fn, items)` should look like ordinary async code; closures, options, cancel tokens flow through without ceremony.
 3. **Add a job scheduler primitive** (`Parallel.scheduler`) with backpressure, retries, deadlines, cancellation, optional persistence (DO-storage default; Queues / D1 / custom adapters).
 4. **Add long-lived stateful actors** (`Parallel.actor`, pinned-state only — see §5.2).
@@ -27,7 +27,7 @@ either drawn from there or measured empirically against deployed Workers.
 
 ### What "$1000 bet" means here
 
-The architecture must survive: a 4N-way composed fan-out under runtime contention; an LRU-thrash storm at the per-owner cache cap; a coordinator-DO restart mid-flight; a user fn that infinite-loops; a runtime where `cpuMs` limits behave differently locally than in production; high-fan-out FD pressure under deep tree fan-out. §11 enumerates these and the mitigations.
+The architecture must survive: an N-way composed fan-out under runtime contention; an LRU-thrash storm at the per-owner cache cap; a coordinator-DO restart mid-flight; a user fn that infinite-loops; a runtime where `cpuMs` limits behave differently locally than in production; high-fan-out FD pressure under deep tree fan-out. §11 enumerates these and the mitigations.
 
 ### Invariant: CPU-bound parallelism only — first-class positioning
 
@@ -37,7 +37,7 @@ This library exists for **CPU-bound parallel work** on Cloudflare Workers. It do
 
 **Do NOT use the library when:** you are awaiting I/O (`fetch`, `env.AI.run`, `env.KV.get`, `env.D1.prepare`, `env.R2.get`). Plain `Promise.all` on one isolate gives you that for free — the event loop suspends each pending await without consuming CPU. Adding fan-out across isolates buys nothing and pays 5-15 ms of dispatch overhead per task.
 
-This positioning is load-bearing for every API decision in this document. The 4N parallelism math, the tree extension, the topology selector, the `Pool` surface — all of it is justified by the CPU-bound use case. `docs/when-to-use.md` is the user-facing version of this invariant.
+This positioning is load-bearing for every API decision in this document. The N-parallelism math, the tree extension, the topology selector, the `Pool` surface — all of it is justified by the CPU-bound use case. `docs/when-to-use.md` is the user-facing version of this invariant.
 
 ---
 
@@ -66,41 +66,37 @@ A `Pool` is a stateless façade in front of a `Coordinator`. An `Actor` is a `Co
 ```
                  ┌────────────────────────────────────────────────┐
 Topology A:      │  Caller Worker (fetch handler)                 │
-in-DO fan-out    │      │ RPC                                     │
-size ≤ 4         │      ▼                                         │
-                 │  Coordinator DO                                │
-                 │      │  parallel env.LOADER.get(id, cb)        │
-                 │      ├──▶ Loader-1 (fresh isolate, exec)       │
-                 │      ├──▶ Loader-2                             │
-                 │      └──▶ Loader-N (cap = 4 from a DO method)  │
-                 │      ◀── results ──                            │
+in-DO            │      │ optional ctx.exports loopback           │
+single-job       │      ▼                                         │
+size ≤ 1         │  CfpInProcessCoordinator  (or CfpCoordinator)  │
+                 │      │  env.LOADER.get(stableKey, code)        │
+                 │      └──▶ Loaded isolate (one V8 heap)         │
+                 │      ◀── result ──                             │
                  └────────────────────────────────────────────────┘
-   Ceiling: 4 parallel isolates per coordinator request.
-   the DO+loader test validated 4.03× speedup at N=4. Lowest dispatch overhead
-   (no DO-to-DO RPC).
+   Single-shot fast path. Used by `submit()` and `pool.map([x], fn)`.
+   No fan-out: one loaded isolate runs the user fn synchronously.
+   Loaders inside the parent process share its V8 scheduler thread, so
+   this topology never tries to spawn N concurrent loaders — fan-outs
+   route to `hybrid` for real CPU parallelism.
 ```
 
 ```
                  ┌──────────────────────────────────────────────────┐
 Topology B:      │  Caller Worker                                   │
 hybrid pool      │      │ RPC                                       │
-size 5..128      │      ▼                                           │
+size 2..K        │      ▼                                           │
 (default for     │  Coordinator DO                                  │
- most workloads) │      │  parallel RPCs to ceil(size/4) child DOs  │
-                 │      ├──▶ Worker DO #1 ─┬─▶ LOADER.get('A1') ─▶ isolate
-                 │      │                  ├─▶ LOADER.get('A2') ─▶ isolate
-                 │      │                  ├─▶ LOADER.get('A3') ─▶ isolate
-                 │      │                  └─▶ LOADER.get('A4') ─▶ isolate (cap=4 per DO)
-                 │      ├──▶ Worker DO #2  (same shape; up to 4 isolates)
+ fan-outs ≤ K)   │      │  parallel RPCs to N leaf DOs              │
+                 │      ├──▶ Leaf DO #1 ─▶ LOADER.get(slot-0) ─▶ isolate
+                 │      ├──▶ Leaf DO #2 ─▶ LOADER.get(slot-1) ─▶ isolate
                  │      ⋮                                           │
-                 │      └──▶ Worker DO #N  (N = ceil(size/4) ≤ 32)  │
+                 │      └──▶ Leaf DO #N ─▶ LOADER.get(slot-N-1) ─▶ isolate
                  │      ◀── results ──                              │
                  └──────────────────────────────────────────────────┘
-   Ceiling: 4 × N = up to 128 parallel isolates per coordinator request.
-   N is bounded by ~32 RPC fan-out per request (dossier I2; the DO-RPC fan-out test
-   validated N=32 fully parallel). Each isolate has its own ~128 MiB
-   heap; cross-host placement (DOs spread within a colo).
-   This is the MAX-parallel default for everyday workloads.
+   Ceiling: N parallel isolates, where N = size and K = maxFanOut
+   (default 32). One job per leaf DO; each leaf is a separate
+   workerd process with its own V8 scheduler thread, so CPU
+   parallelism scales linearly with leaf count.
 ```
 
 ```
@@ -108,25 +104,25 @@ size 5..128      │      ▼                                           │
 Topology C:      │  Caller Worker                                       │
 hierarchical     │      │ RPC                                           │
 tree             │      ▼                                               │
-size > 128       │  Root Coordinator DO                                 │
-(or explicit     │      │ parallel RPCs to F tier-1 sub-coords          │
- maxFanOut=B)    │      ├──▶ Sub-coord A ─┬─▶ Leaf DO A1 (4 loaders)    │
-                 │      │                 ├─▶ Leaf DO A2 (4 loaders)    │
+size > K         │  Root Coordinator DO                                 │
+                 │      │ parallel RPCs to F tier-1 sub-coords          │
+                 │      ├──▶ Sub-coord A ─┬─▶ Leaf DO A1 (one job)      │
+                 │      │                 ├─▶ Leaf DO A2 (one job)      │
                  │      │                 ⋮                             │
-                 │      │                 └─▶ Leaf DO A_F (4 loaders)   │
+                 │      │                 └─▶ Leaf DO A_x (one job)     │
                  │      ├──▶ Sub-coord B  (same shape)                  │
                  │      ⋮                                               │
                  │      └──▶ Sub-coord F  (same shape)                  │
                  │      ◀── reduced results ──                          │
                  └──────────────────────────────────────────────────────┘
-   Ceiling: 4 × F^K parallel isolates for K tiers, branching factor F.
-   tiers = ceil(log_F(size / 4)). With F=8 default:
-     size=128 → K=2 (up to 256 isolates)
-     size=1024 → K=3 (up to 2048)
-      size=8192 → K=4 (up to 16384)
-    Latency cost: K × DO-RPC hop (~3 ms warm, 30–80 ms cold per hop).
-    Used past 128 because (a) single-coord ~32 fan-out cap, (b) deep
-    fan-out from a single DO causes back-pressure under sustained load.
+   Ceiling: F^K leaf DOs for branching factor F, depth K. With F=8
+   default and K = ceil(log_F(size / maxFanOut)):
+     size > 32  → K=1 (each sub-coord owns ≤ 32 leaves)
+     size > 256 → K=2 (depth 2 covers up to 8 × 32 = 256 leaves; ceil → 2)
+     size > 2048 → K=3, etc.
+   Latency cost: K × DO-RPC hop (~3 ms warm, 30–80 ms cold per hop).
+   Used past `maxFanOut` because a single coordinator cannot exceed
+   that RPC fan-out per turn.
 ```
 
 ```
@@ -139,13 +135,16 @@ loader-only      │      │ env.LOADER.get(id, cb)                  │
  topology)       │      ◀── results ──                            │
                  └────────────────────────────────────────────────┘
    Reachable EXCLUSIVELY via Parallel.loaderOnly(env, opts), which
-   returns a structurally smaller LoaderOnlyPool type. Hard cap at
-   size=3. Use only when you specifically need zero DO ops.
+   returns a structurally smaller LoaderOnlyPool type. The fetch
+   handler's 3-loader cap caps concurrent isolates at 3; CPU
+   parallelism within one Worker process is bounded by the V8
+   scheduler thread regardless. Use only when you specifically need
+   zero DO ops and accept the in-process serialization.
 ```
 
 ### 3.2 Why loader-only is a separate factory
 
-In-DO Topology A is strictly more parallel (4 vs 3) and only adds ~30–80 ms cold-start on first call (warm subsequent). For any production workload that ever needs `warm`, `drain`, `stats`, streaming, or `pool.handle`, the in-DO topology is correct from start. Users who specifically want zero-DO ops call `Parallel.loaderOnly(env, opts)`, which returns a structurally smaller `LoaderOnlyPool` type. Methods unimplementable without a coordinator (`warm`, `drain`, `stats`, `mapStream`, `mapOrdered`, `submitStream`, `handle`) are *absent at the type level* — calling them is a compile-time error, not a runtime no-op.
+`Pool` always uses DO-backed dispatch, which is what unlocks real CPU parallelism (each leaf = own workerd process). `LoaderOnlyPool` is the escape hatch for callers that explicitly do NOT want DO ops — useful for single-tenant sandboxed exec where dispatch overhead matters more than parallelism. Methods unimplementable without a Coordinator DO (`warm`, `drain`, `stats`, `mapStream`, `mapOrdered`, `submitStream`, `handle`) are *absent at the type level* on `LoaderOnlyPool` — calling them is a compile-time error, not a runtime no-op.
 
 ### 3.3 Why `WorkerEntrypoint` RPC everywhere on the wire
 
@@ -167,80 +166,71 @@ The HTTP submit-code "VM" surface in §5.4 is the *only* `fetch`-shaped public s
 type Topology = 'auto' | 'in-do' | 'hybrid' | 'tree';
 // Note: 'loader-only' is NOT in this union — it's a separate factory (Parallel.loaderOnly()).
 
-function selectTopology(size: number, opts: PoolOptions, env: PoolEnv): Exclude<Topology, 'auto'> {
+function selectTopology(size: number, opts: PoolOptions): Exclude<Topology, 'auto'> {
   const explicit = opts.topology;
   if (explicit && explicit !== 'auto') return explicit;       // honor pinning
 
-  const threshold = opts.treeThreshold ?? 128;
-  if (size <= 4)         return 'in-do';                       // single DO + ≤4 loaders (the DO+loader test)
-  if (size <= threshold) return 'hybrid';                      // ceil(size/4) DOs × 4 loaders (the loader-cap × DO fan-out composition)
+  const maxFanOut = opts.maxFanOut ?? 32;
+  const threshold = opts.treeThreshold ?? maxFanOut;
+  if (size <= 1)         return 'in-do';                       // single loaded isolate, no fan-out
+  if (size <= threshold) return 'hybrid';                      // N leaf DOs, one job each
   return 'tree';                                               // hierarchical multi-coord
 }
 ```
 
 Loader-only is reachable exclusively via `Parallel.loaderOnly()`. The auto-selector cannot return it (it's not in the type union). This makes the type-narrowing structural and unbypassable.
 
-### 4.2 Hybrid leaf-shape — the new MAX-parallel default
+### 4.2 Hybrid leaf-shape — one job per leaf DO
 
-For `5 ≤ size ≤ treeThreshold` (default 128):
+For `2 ≤ size ≤ treeThreshold` (default `maxFanOut`, i.e. 32):
 
-- Number of child DOs: `N = ceil(size / 4)`.
-- Each child DO method, when called from the Coordinator, runs up to 4 concurrent loaders (the DO+loader test cap).
-- Coordinator → child DO is RPC, NOT loader-bound (RPC fan-out is not loader-capped).
-- Each isolate has its own ~128 MiB heap and lives on the host where its child DO lives (cross-host within a colo).
+- Number of leaf DOs: `N = size` (one job per leaf).
+- The Coordinator DO emits `N` parallel RPCs (one per leaf) within a single Promise.all turn.
+- Coordinator → leaf DO is RPC, NOT loader-bound (RPC fan-out is not loader-capped).
+- Each leaf DO loads the user fn into one isolate with key `cfp:<fnHash>:slot-<i>`. That isolate runs on the leaf DO's own V8 scheduler thread — which is on a separate workerd process from the coordinator and every other leaf.
 
-**Capacity vs load — distinguish two numbers**:
-- *Capacity ceiling* `C = 4N = 4·ceil(size/4)`. Always ≥ size, ≤ size + 3. The maximum number of isolates the topology *could* spin up.
-- *Actual concurrent isolates dispatched* = `size`. Library never exceeds this.
+**This is where CPU parallelism comes from**: N separate processes, each with one CPU-bound user fn running on it. Loaders within one DO would share that DO's V8 thread; the library deliberately avoids bundling jobs into one leaf so the per-leaf thread is dedicated to a single user fn at a time.
 
-**Leaf-shape distribution algorithm**. Distribute `size` jobs across `N` DOs with no DO exceeding 4 loaders. The library uses **balanced-fill** — the first `(size mod N)` DOs get `ceil(size/N)` loaders, the remaining `(N - size mod N)` DOs get `floor(size/N)` loaders. With `N = ceil(size/4)`, this is equivalent to: fill DOs 4-at-a-time from index 0 until we run out of work; the last DO gets the remainder.
+**Leaf-shape**: `leafShape = [1, 1, ..., 1]` (length `N = size`). The array is retained (rather than just `size`) so dispatch helpers can carve out arbitrary leaf ranges in the tree topology.
 
-```
-size=17, N=5:  [4, 4, 4, 4, 1]      // first four DOs full (16), last gets remainder (1)
-size=20, N=5:  [4, 4, 4, 4, 4]      // exact fill
-size=10, N=3:  [4, 3, 3]            // ceil(10/3) = 4; size mod N = 1; first DO gets 4, rest get 3
-size=128, N=32: 32 × 4               // exact fill — the hybrid ceiling
-```
+### 4.3 Hierarchical tree for size > treeThreshold
 
-`topology/plan.ts` exposes the resulting distribution as a typed `TopologyPlan.fanOut: number[]`. Selector golden tests in §11.1 pin the algorithm.
+In tree topology, every tier *except the deepest* is a coordinator-only DO that fans out RPCs; the deepest tier is a hybrid leaf — one leaf DO per job. **K counts coordinator tiers above the hybrid leaf**, so total depth from caller to loader is `K + 1` RPC hops + 1 LOADER.get.
 
-### 4.3 Hierarchical tree for size > treeThreshold (default 128)
+Branching factor F (default `8`, configurable via `opts.branchingFactor`, range 4..16). Depth `K = max(1, ceil(log_F(size / maxFanOut)))`.
 
-In tree topology, every tier *except the deepest* is a coordinator-only DO that fans out RPCs; the deepest tier is a hybrid leaf — child DOs each running up to 4 loaders. **K counts coordinator tiers above the hybrid leaf**, so total depth from caller to loader is K+1 RPC hops + 1 LOADER.get.
+- size ≤ 32 fits in hybrid (no tree).
+- 33 ≤ size ≤ 256 → K=1 with F=8 (root → up to 8 sub-coords → ≤32 leaves each).
+- 257 ≤ size ≤ 2048 → K=2 (root → 8 sub-coords → 8 sub-coords each → ≤32 leaves each).
+- size ≤ 16384 → K=3, etc.
 
-Branching factor F (default `8`, configurable via `opts.branchingFactor`, range 4..16). Depth `K = ceil(log_F(size / 4))`.
-
-- size=128 fits in hybrid (no tree).
-- size=129..1024 → K=2 with F=8 (up to 4 × 8² = 256 isolates).
-- size=1025..8192 → K=3 (up to 4 × 8³ = 2048).
-- size > 8192 → K=4 (up to 4 × 8⁴ = 16384).
-- size > 65536 → K=5 (up to 4 × 8⁵ ≈ 131k).
-
-**Tree work-distribution algorithm** (extends §4.2 balanced-fill recursively): each tier divides its incoming `size` evenly across `F` sub-coords using balanced-fill. The bottom tier's hybrid leaves use balanced-fill to pin loaders to ≤4 per DO. `topology/plan.ts` builds a typed `TopologyPlan` AST and §11.1 pins the per-size leaf-shape vector.
+**Tree work-distribution algorithm** (recursive balanced-fill): each tier divides its incoming `size` evenly across `F` sub-coords using `balancedFill`. The bottom tier is a hybrid leaf with one job per leaf DO. `topology/plan.ts` builds a typed `TopologyPlan` AST; §11.1 pins the per-size leaf-shape vector.
 
 ```
-size=200, F=8, K=2:
-  root → 8 sub-coords (each receives 25 jobs) → each sub-coord → 7 leaf DOs (balanced-fill: [4,4,4,4,4,4,1])
-  total leaves: 8 × 7 = 56;  total isolates: 200
-size=2000, F=8, K=3:
-  root → 8 sub-coords (250 each) → each → 8 sub-coords (32 each) → each → 8 leaf DOs (balanced-fill 4×8)
-  total leaves: 8 × 8 × 8 = 512;  total isolates: 2000
+size=200, F=8, K=1:
+  root → 8 sub-coords (balancedFill: [25,25,25,25,25,25,25,25])
+  each sub-coord → 25 leaf DOs (one job each)
+  total leaves: 8 × 25 = 200
+
+size=2000, F=8, K=2:
+  root → 8 sub-coords (each 250 jobs)
+  each → 8 sub-coords (each ~31–32 jobs)
+  each → ~31–32 leaf DOs (one job each)
+  total leaves: 2000
 ```
 
-Each tier consumes one DO RPC hop (~5 ms warm, 30–80 ms cold). Total request latency adds (K+1) × hop. The library does NOT cap aggregate fan-out (cost is not a concern); for latency-sensitive paths, raise `treeThreshold` (defer tree onset) or pin `topology: 'hybrid'` (refuse to cascade — fails at runtime if `size > maxFanOut * 4`).
+Each tier consumes one DO RPC hop (~5 ms warm, 30–80 ms cold). Total request latency adds `(K + 1) × hop`. The library does NOT cap aggregate fan-out (cost is not a concern); for latency-sensitive paths, raise `treeThreshold` (defer tree onset) or pin `topology: 'hybrid'` (refuse to cascade — fails at runtime if `size > maxFanOut`).
 
 ### 4.4 Choice of branching factor F = 8
 
 F = 8 is a balance between:
-- **Latency**: depth = ceil(log_F(size/4)). F=8 gives K=2 up to 256, K=3 up to 2048, K=4 up to 16k. Shallower trees mean fewer RPC hops.
+- **Latency**: depth = `ceil(log_F(size / maxFanOut))`. F=8 gives K=1 up to 256, K=2 up to 2048, K=3 up to 16k. Shallower trees mean fewer RPC hops.
 - **Per-tier RPC fan-out**: each tier emits F outbound RPCs. F=8 keeps each tier well below the documented ~32 RPC fan-out cap. Avoids deep-fan-out back-pressure on a single DO.
 - **Subrequest budget per Worker invocation**: each tier consumes F outbound RPCs + 1 inbound. F=8 → 9 subrequests per tier; trivial against Bundled 50 / Unbound 1000.
-- **LRU thrash per leaf**: each leaf DO sees ~`size/F^K` jobs. With F=8 and 50/owner LRU per leaf process, leaves hit thrash at very different sizes.
+- **LRU thrash per leaf**: each leaf DO sees one job per request, so warm reuse is purely about the per-leaf cache (50/owner LRU) across requests.
 - **Simplicity**: `ceil(log_8(N))` is human-legible.
 
-`F = 4` is the principled alternative for high-fn-shape-diversity workloads: it gets you to ≥`size` leaves with smaller per-tier fan-out (less single-DO back-pressure when you have many concurrent users) at the cost of one extra tier on large sizes (K=4 with F=4 reaches 1024 leaves; F=8 reaches 4096). Recommend `branchingFactor: 4` when each leaf process is likely to see >25 distinct fn shapes (≈ 50/2 LRU headroom).
-
-F is exposed as `opts.branchingFactor` (range 4..16). Below 4 is rejected (forces excessive depth); above 16 saturates per-tier RPC fan-out.
+`F = 4` is the principled alternative for very high fan-out workloads where each tier's outbound RPCs deserve more headroom (less single-DO back-pressure) at the cost of one extra tier on large sizes. F is exposed as `opts.branchingFactor` (range 4..16). Below 4 is rejected (forces excessive depth); above 16 saturates per-tier RPC fan-out.
 
 ### 4.5 Override surface
 
@@ -709,16 +699,16 @@ src/
     testing.ts        — poolFake / actorFake / schedulerFake / vmFake (in-process, structured-clone-enforcing)
 
   topology/
-    selector.ts       — selectTopology(size, opts, env) → Topology
+    selector.ts       — selectTopology(size, opts) → Topology
     loader-only.ts    — `Parallel.loaderOnly()` factory + `LoaderOnlyPool` impl (no DO needed)
-    in-do.ts          — Topology A (single coordinator + 4 loaders)
-    hybrid.ts         — Topology B: ceil(size/4) child DOs × 4 loaders each
-    tree.ts           — Topology C: hierarchical multi-coord; branching factor F
+    in-do.ts          — Topology A (single loaded isolate; size ≤ 1 fast path)
+    hybrid.ts         — Topology B: N leaf DOs, one job each (CPU parallelism = N)
+    tree.ts           — Topology C: hierarchical multi-coord; branching factor F; each leaf still runs one job
     plan.ts           — TopologyPlan typed AST: { topology, fanOut[], leafShape }
 
   coordinator/
-    coordinator.ts    — Coordinator DO class. Cancel race at coordinator. Per-DO loader semaphore (≤4).
-    worker-do.ts      — Worker DO (hybrid leaf): receives RPC, runs up to 4 loaders concurrently
+    coordinator.ts    — Coordinator DO class. Cancel race at coordinator. Per-DO loader semaphore (cap=4 from a DO method, defensively queues if any caller drives `runBatch` with size > 4).
+    worker-do.ts      — Worker DO (hybrid leaf): receives RPC, runs one job per request
     sub-coordinator.ts — Sub-coordinator DO (tree mid-tier)
     do-class.ts       — exported DO classes (CfpCoordinator / CfpWorkerDO / CfpSubCoord / CfpSchedulerDO)
 
@@ -781,17 +771,29 @@ testing/                — separate exports path (production bundles do not pul
 ### 7.2 Cache-key strategy
 
 ```
-loader id = `cfp:${codeHash}`              // stable, dedups across submissions; default
-loader id = `cfp:${codeHash}:${i}`         // forced fresh isolate; opt-in per-call
-loader id = `cfp:${codeHash}:${windowMs}`  // opt-in 'auto': fresh-per-60s-window
+loader id = `cfp:${codeHash}:slot-${i}`      // stable + per-task slot (default); dedups across calls AND parallelizes within one fan-out
+loader id = `cfp:${codeHash}:${counter}`     // forced fresh isolate; opt-in per-call
+loader id = `cfp:${codeHash}:w${windowMs}:slot-${i}`  // opt-in 'auto': fresh-per-60s-window with slot
 ```
 
 `PoolOptions.cacheKeyStrategy: 'stable' | 'fresh' | 'auto'` controls behavior:
-- `'stable'` (default): one isolate per fn shape; long-lived heap reuse. Best for steady-state throughput. Module-level state in the loaded isolate persists between calls — user fns must not rely on per-call freshness.
+- `'stable'` (default): per-`(fnShape, slot)` isolate; long-lived heap reuse across calls, distinct isolates across concurrent tasks within a single fan-out. Best for steady-state throughput. Module-level state in the loaded isolate persists between calls — user fns must not rely on per-call freshness.
 - `'fresh'`: counter-suffixed; forces a fresh isolate per call. Use only when you genuinely need a clean V8 heap per submission (testing, sandboxing distrusted code per-call). Pays full isolate-load cost on every call.
-- `'auto'` (opt-in): hybrid — buckets by 60-second windows. Fresh isolate per shape per 60s window. Use only when (a) you have a small fixed set of fn shapes AND (b) you actively want periodic isolate refresh. With high fn-shape diversity (>50 distinct shape-windows/hour) this thrashes the per-owner LRU and causes cold-start storms; the default was changed away from `'auto'` after a third-party review surfaced the eviction storm.
+- `'auto'` (opt-in): hybrid — buckets by 60-second windows. Fresh isolate per `(shape, slot, window)`. Use only when (a) you have a small fixed set of fn shapes AND (b) you actively want periodic isolate refresh. With high fn-shape diversity (>50 distinct shape-windows/hour) this thrashes the per-owner LRU and causes cold-start storms; the default was changed away from `'auto'` after a third-party review surfaced the eviction storm.
 
 Per-submission `{ freshIsolate: true }` overrides for hot calls.
+
+#### Task slot: isolate distinction within a fan-out
+
+A `pool.map([a,b,c,d], fn)` at N=4 produces FOUR distinct loader keys: `cfp:<hash>:slot-0` through `cfp:<hash>:slot-3`. In the hybrid topology those four loaders live in four different leaf DO processes — that's where CPU parallelism comes from. The slot suffix is what stops the Worker Loader's by-key cache from collapsing identical keys into one shared isolate when callers happen to land on the same DO (e.g. via `LoaderOnlyPool` from a fetch handler, or in any future topology that reuses a process across tasks).
+
+A subsequent `pool.map([e,f,g,h], fn)` at N=4 hits the same four keys → warm reuse on the same four leaf DOs.
+
+Larger fan-outs (hybrid, tree) preserve the slot index globally across the tree: the i-th task in the original `argsList` lands at global slot `i` no matter how deeply the coordinator splits the work. Each leaf DO sees a contiguous range of global slots, so the same task position reliably reuses the same isolate across calls.
+
+Single-shot `submit()` uses slot `0` so it shares the same isolate as slot-0 of a future `map` — compatible reuse.
+
+**Note on what the slot does not do.** Slot-keyed isolates are an isolation primitive (independent V8 heaps, independent module state). They do not, by themselves, multiply CPU; CPU parallelism is a property of process count, which is what the hybrid topology delivers by spreading the N slots across N leaf DOs.
 
 ### 7.3 Sandbox controls
 
@@ -818,7 +820,7 @@ Per-submission `{ freshIsolate: true }` overrides for hot calls.
 
 The library never issues more than `cap` concurrent `env.LOADER.get(...)` calls from a single V8 isolate, where `cap = 3` from a Worker fetch handler and `cap = 4` from a DO method. Implementation: a per-isolate semaphore in `loader/loader-budget.ts`. Auto-detected at coordinator startup via a small probe (cost: one cancelled DW invocation; result cached in `globalThis.cfpLoaderCap`). The cache is per-V8-isolate (per-process); a fresh DO instance re-probes once on first dispatch. Library does NOT share the value via DO storage or KV.
 
-**The per-isolate invariant.** A V8 isolate is a closed world: each isolate has its own heap, its own bag-of-globals, and its own `globalThis`. There is no shared module state across isolates — every `import` evaluates per-isolate, every top-level `let` is per-isolate, and every property assigned to `globalThis` is per-isolate by construction. We rely on this for the loader semaphore: stashing the semaphore on `globalThis.cfpLoaderSem` gives us exactly one semaphore per isolate, with zero cross-isolate coupling. Two DO instances on the same metal but in different isolates do not see each other's semaphore state — which is precisely what the hybrid topology needs to compose `4 × N` parallelism.
+**The per-isolate invariant.** A V8 isolate is a closed world: each isolate has its own heap, its own bag-of-globals, and its own `globalThis`. There is no shared module state across isolates — every `import` evaluates per-isolate, every top-level `let` is per-isolate, and every property assigned to `globalThis` is per-isolate by construction. We rely on this for the loader semaphore: stashing the semaphore on `globalThis.cfpLoaderSem` gives us exactly one semaphore per isolate, with zero cross-isolate coupling. Two DO instances on the same metal but in different isolates do not see each other's semaphore state — which is what makes each leaf DO an independent unit of CPU parallelism in the hybrid topology.
 
 **Permit released on caller-settle, not on `LOADER.get` resolution**. The semaphore permit returns to the pool the moment the caller's outer promise settles (success / error / cancel), regardless of whether the underlying loader call has actually completed. This avoids a deadlock where 4 cancelled-but-orphaned isolates hold all permits while the caller has moved on. Consistent with ADR-11 ("library does NOT track or cap orphan isolates"): the orphan continues running in the runtime's view, but the library's semaphore book-keeping treats the slot as available for the next dispatch.
 
@@ -911,7 +913,7 @@ Flow:
 2. The dispatch loop is single-flight (`#loopRunning` guard); pulls jobs round-robin across tenants up to `inFlightLimit`, capped by `fairCapacityPerTenant` per tenant. For each pick: `claim({ jobId })` (CAS on the specific row chosen by fair-queueing — never "oldest queued"); fire-and-forget `runJob`. On settle: ack/fail in storage; `kick()` re-enters.
 3. Alarms exist only as a backstop: retry-after-backoff (`onScheduleRetry`), result-TTL sweep, expired-lease reclaim.
 
-Throughput: bounded by `inFlightLimit × loader-cap-per-isolate` (=4 from a DO method); default `inFlightLimit=32` ⇒ ~128 concurrent isolates per DO. The previous alarm-batched model capped at `MAX_BATCH_PER_ALARM / ALARM_SWEEP_MS = 4 / 5s = 0.8 jobs/s`. Measured throughput in `tests/unit/dispatcher.test.ts` exceeds 50 jobs/s on the test runner; production worker throughput is bounded by isolate cold-start and downstream latency, not by dispatch.
+Throughput: bounded by `inFlightLimit` (default 32 in-flight jobs). Jobs running on the scheduler DO's own thread serialize on CPU but overlap on I/O; for CPU-heavy workloads, submit via `Parallel.pool` map fan-outs so the work spreads across leaf DOs. The previous alarm-batched model capped at `MAX_BATCH_PER_ALARM / ALARM_SWEEP_MS = 4 / 5s = 0.8 jobs/s`. Measured throughput in `tests/unit/dispatcher.test.ts` exceeds 50 jobs/s on the test runner; production worker throughput is bounded by isolate cold-start and downstream latency, not by dispatch.
 
 ### 8.8 Persistence-flavor matrix
 
@@ -1049,7 +1051,7 @@ await pool.submit(async (data, env) => {
 
 **Live transport.** Cancel state travels caller → coordinator → child DO → loaded isolate as a `ReadableStream<Uint8Array>` carried in the loader's `env.cancelStream`. The Workers runtime structured-clones streams across DO RPC, so a single stream end-to-end is real. When the user's `CancelToken.cancel(reason)` fires, the producer enqueues a single chunk; the consumer at the loaded-isolate end reads the chunk and calls `controller.abort(new CancelledError(reason))` on a local `AbortController` whose signal is exposed as `env.signal`. Latency: bounded by RPC stream propagation (typically < 50 ms in-colo).
 
-**Fan-out forking.** At every level (in-DO 4-loader fan-out, hybrid leaf fan-out, tree sub-coord fan-out) the upstream stream is **tee'd** by `forkCancelStream(stream, n)` so each downstream leg gets its own single-reader copy. Cancel propagates to all branches.
+**Fan-out forking.** At every level (hybrid leaf fan-out and tree sub-coord fan-out) the upstream stream is **tee'd** by `forkCancelStream(stream, n)` so each downstream leg gets its own single-reader copy. Cancel propagates to all branches.
 
 **Caller-side `Promise.race`.** The caller's outer promise is also raced against `cancel.cancelled`, so the caller observes `CancelledError` immediately (even if the loaded isolate is in a tight loop with no awaits). The orphan isolate continues to `cpuMs` / wall-clock — that's a runtime constraint (the Worker Loader API does not yet expose an `abort(id)` primitive; the moment it ships, the runner will additionally actively abort with no public-API change).
 
@@ -1147,9 +1149,9 @@ Span-shaped events with `traceId`/`spanId` propagated as `tracestate`-style head
 Per topology:
 
 - `Parallel.loaderOnly()` (separate factory): assert N=1..3 succeed, N=4 fails with `Too many concurrent dynamic workers`. Type-check: returned value's type does NOT have `.warm`, `.drain`, `.stats`, `.mapStream`, `.mapOrdered`, `.submitStream`, `.handle`.
-- `in-do`: assert N=1..4 succeed with full N× speedup; N=5 picked up by selector → `hybrid`.
-- `hybrid`: assert size=8 runs as 2 child DOs × 4 loaders = 8 isolates; size=128 runs as 32 × 4 = 128 isolates; flat scaling.
-- `tree`: assert K=2 (size=129..1024) and K=3 (size=1025..8192). Fan-out per level matches.
+- `in-do`: assert size = 1 runs in a single loaded isolate; selector routes size ≥ 2 to `hybrid`.
+- `hybrid`: assert size = 8 runs as 8 leaf DOs (one job each); size = 32 runs as 32 leaf DOs; speedup vs sequential is close to linear.
+- `tree`: assert K=1 (size 33..256) and K=2 (size 257..2048). Fan-out per level matches; each leaf runs one job.
   - **Chaos tests**: kill K/4 of K sub-coordinators mid-fan-out at random offsets; assert root delivers partial results per `onError` mode. Send `parent.cancel()` to a 1024-way tree at t=200ms; assert all sub-coords stop dispatching new work within 500ms. Induce sub-coord deadline expiry on 1 of K; assert that branch is correctly attributed.
 
 Eviction simulation: `LOADER.get(id, cb)` with callback that logs invocations; force eviction by spawning >50 unique ids; assert library handles re-invocation transparently.
@@ -1159,10 +1161,10 @@ LRU thrash: spawn 60 distinct fn shapes at hybrid size=64; observe `PoolStats.lr
 ### 11.3 Bench harness
 
 Replicate the loader-from-fetch test/B/C/D matrix; CI gate:
-- `in-do` size 4: ≥ the DO+loader test baseline ± 10% (4.03× speedup).
-- `hybrid` size 32: ≥ the DO-RPC fan-out test baseline ± 10% (the original the DO-RPC fan-out test, 1 loader/DO; new hybrid should be strictly faster).
-- `hybrid` size 128: validate 4N math — assert ≥80 simultaneous unique loader isolates.
-- `tree` size 1024: scaling factor ≥ 0.7× linear vs hybrid size 128 (latency K-hop overhead dominates linear scaling).
+- `in-do` size 1: dispatch overhead < 5 ms warm.
+- `hybrid` size 4: ≥ 3× speedup vs sequential (matches cf-mp-vm `/b/benchmark?n=4` parallel-diff baseline of 4.07×, modulo per-leaf RPC overhead).
+- `hybrid` size 32: scaling factor ≥ 0.7× linear (32 × per-tile work, fully parallel modulo dispatch overhead).
+- `tree` size 1024: scaling factor ≥ 0.7× linear vs hybrid size 32 (latency K-hop overhead dominates linear scaling).
 - `vm` size 1: end-to-end p50 ≤ the HTTP submit-code test baseline + 50ms.
 
 ### 11.4 Fuzz
@@ -1214,16 +1216,16 @@ Replicate the loader-from-fetch test/B/C/D matrix; CI gate:
 | R6 | `cpuMs` may behave differently in local dev than in production. | Set `limits` anyway; runtime probe at startup to learn the production error shape (§10.4). Fuzz with deliberately-overrun fns; document drift. |
 | R7 | LRU thrash at >50 distinct loader ids per process per owner. | Document inflection in `PoolStats.lruEvictionLast60sCount`. Cost is graceful (cold-start tax, no error). Library does NOT cap aggregate fan-out . |
 | R-Actor | Pinned-state Actor's 16 MiB structured-clone-per-submit cap. | Documented in §5.2; recommend Workflows for larger state, or partition state across actor sub-ids. |
-| R-Tree | Subrequest budgets are **per-Worker invocation**, not aggregate cross-tier. Each tree tier consumes ~F outbound RPCs + 1 inbound (≤F+1 ≈ 9 with default F=8) per Worker invocation. The real Bundled risk is at the LEAF if user-fn subrequests + 4 LOADER.get + 1 result-write > 50. | `doctor` CLI flags pools with declared user-fn subrequest count > 45. Library does NOT refuse tree topology on Bundled at construction; the per-tier ≤9 fits within Bundled 50 with massive headroom. |
+| R-Tree | Subrequest budgets are **per-Worker invocation**, not aggregate cross-tier. Each tree tier consumes ~F outbound RPCs + 1 inbound (≤F+1 ≈ 9 with default F=8) per Worker invocation. The real Bundled risk is at the LEAF if user-fn subrequests + 1 LOADER.get + 1 result-write > 50. | `doctor` CLI flags pools with declared user-fn subrequest count > 45. Library does NOT refuse tree topology on Bundled at construction; the per-tier ≤9 fits within Bundled 50 with massive headroom. |
 | R-Cancel | Cooperative cancel relies on user fn polling. Tight loops never see cancel until `cpuMs` kills them. | Documented contract. Coordinator's Promise.race surfaces `CancelledError` immediately to caller. When `env.LOADER.abort(id)` ships, library actively aborts. |
 
 ### 13.2 ADR-1: Composed-topology ladder; loader-only is a separate factory (not a Pool topology)
 
-**Decision.** `Parallel.pool` auto-selector picks one of `in-do` (size ≤ 4), `hybrid` (size 5..`treeThreshold`, default 128), or `tree` (size > threshold). `loader-only` is exposed via a *separate* `Parallel.loaderOnly()` factory that returns a structurally smaller `LoaderOnlyPool`. The `Pool` `Topology` type union does NOT include `'loader-only'`.
+**Decision.** `Parallel.pool` auto-selector picks one of `in-do` (size ≤ 1, single-loaded-isolate fast path), `hybrid` (size 2..`treeThreshold`, default `maxFanOut` = 32), or `tree` (size > threshold). `loader-only` is exposed via a *separate* `Parallel.loaderOnly()` factory that returns a structurally smaller `LoaderOnlyPool`. The `Pool` `Topology` type union does NOT include `'loader-only'`.
 
 **Reasoning.**
-- The composed math (the loader-cap × DO fan-out composition: N child DOs × 4 loaders each = 4N) gives strictly more parallelism than either pure topology alone.
-- Loader-only's 3-cap ceiling is strictly worse than in-do's 4-cap with only ~30–80 ms cold-start tax.
+- CPU parallelism on the Cloudflare runtime scales with **DO count** (each leaf DO is its own workerd process with its own V8 scheduler thread), not with loader count inside one DO. The hybrid topology therefore dispatches one job per leaf DO. The tree topology extends this by adding coordinator tiers; every leaf in the tree still runs one job.
+- Loader-only's 3-cap ceiling is strictly worse than the DO-backed `hybrid` (which scales to `maxFanOut` leaves per coordinator tier and beyond via the tree). It exists only for the corner case where the caller specifically does not want to bind a Coordinator DO.
 - TypeScript overload-on-string-literal narrowing is unsound when the literal is computed (e.g., `const opts = { topology: someVar }` collapses to `Topology` and silently picks the wrong overload). The factory split makes type narrowing structural, not literal-dependent.
 
 **Cost.** Two factories instead of one. Two factories with structurally distinct return types is the right answer for compile-time soundness.
@@ -1252,9 +1254,11 @@ Replicate the loader-from-fetch test/B/C/D matrix; CI gate:
 
 **Reasoning.** `AbortSignal` does not cross DO RPC. Delivering the signal as a positional argument collides with the `(...userArgs, env)` user-fn shape: a fn `(x, env) => env.AI.run(...)` would receive `(42, signal)` if the signal were appended positionally. Placing the signal inside `env` keeps user-fn arity stable across cancel-on/cancel-off invocations. There is no orphan-budget concern; cost is not a design driver. When `env.LOADER.abort(id)` ships, the library will additionally actively abort.
 
-### 13.7 ADR-6: Stable cache keys; opt-in fresh isolate
+### 13.7 ADR-6: Stable cache keys with per-task slot; opt-in fresh isolate
 
-**Decision.** Default loader id is `cfp:${codeHash}` (`cacheKeyStrategy: 'stable'`). `'auto'` (60s windows) is opt-in. `freshIsolate: true` per call forces a counter-suffixed key.
+**Decision.** Default loader id is `cfp:${codeHash}:slot-${taskSlot}` (`cacheKeyStrategy: 'stable'`). Each task in a fan-out receives a unique `taskSlot` index ∈ [0, N), so concurrent `loader.get` calls return N distinct loaded isolates. The slot is stable across calls so a subsequent `pool.map` at the same N reuses the same warm isolates. `'auto'` (60s windows) is opt-in and also slot-suffixed. `freshIsolate: true` per call forces a counter-suffixed key that ignores the slot.
+
+The slot suffix is an **isolation** primitive (one V8 heap per concurrent task → no cross-task memory aliasing, no shared module-state surprises), not a CPU-parallelism primitive. CPU parallelism comes from the hybrid/tree topologies that spread work across separate workerd processes (one leaf DO per ~4 tasks).
 
 **Reasoning.** Stable keys reuse warm isolates and never multiply cache entries per fn shape across time. The earlier default `'auto'` (60s windows) proved unsafe in deployments with high fn-shape diversity: with the per-owner LRU bounded to ~50 entries, any deployment that rotates more than 50 distinct shape-windows per hour evicts hot loaders and pays repeated cold-start cost. A third-party review surfaced this as the dominant cause of unexpected p99 latency tails. `'auto'` is preserved as an opt-in for the small-set-of-shapes / want-periodic-refresh case.
 

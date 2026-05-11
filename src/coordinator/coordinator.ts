@@ -115,6 +115,10 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
         },
         args: request.args,
         freshIsolate: request.freshIsolate,
+        // Single-shot through the DO coordinator uses slot 0 — same
+        // convention as the loopback path and as slot-0 of a future
+        // `map` fan-out.
+        taskSlot: request.taskSlot ?? 0,
         cancelStream: request.cancelStream,
       });
       return { ok: true, value };
@@ -134,12 +138,25 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     const size = request.argsList.length;
     if (size === 0) return { results: [], topology: 'in-do', fanOutPerLevel: [], treeDepth: 1 };
     const plan = selectTopology(size, request.selector ?? {});
-    // Per-request leaf-DO sharding. Without this, two concurrent fan-out
-    // requests would target the same `${coordId}-leaf-${i}` DOs and contend
-    // on those DOs' per-isolate loader semaphore — silently halving the
-    // headline 4N parallelism. We accept fresh leaves per request: max
-    // parallelism wins.
-    const requestId = `r${++this.#requestCounter}-${crypto.randomUUID().slice(0, 8)}`;
+    // Stable leaf-DO sharding. The leaf-DO name is derived solely from
+    // the leaf index, so subsequent fan-outs of the same size land on
+    // the same warm leaves. This is what makes the warm path fast:
+    // a brand-new leaf DO pays ~300–400 ms of creation cost on first
+    // RPC; reusing it amortizes that to ~0 across subsequent runs.
+    //
+    // The previous design appended a per-request UUID to the leaf
+    // name to avoid contention between concurrent requests on the
+    // SAME coordinator DO. Empirically that contention is rare (a
+    // single coord DO already serializes on its own V8 thread, so
+    // overlapping fan-out requests have minor inter-request latency
+    // anyway) and the cold-start tax it imposed was 300–500 ms per
+    // request — strictly worse than the contention it averted. The
+    // round-trip latency win from warm leaves dominates.
+    //
+    // `requestId` is kept as a stable empty string here so the
+    // downstream dispatch helpers' leaf-name template (`${coordId}-
+    // ${requestId}-leaf-${i}`) collapses to a deterministic name.
+    const requestId = '';
     const dispatched = await this.#dispatchPlan(plan, request, requestId);
     return {
       results: dispatched.results,
@@ -148,8 +165,6 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
       treeDepth: plan.topology === 'tree' ? plan.depth : 1,
     };
   }
-
-  #requestCounter = 0;
 
   async #dispatchPlan(
     plan: TopologyPlan,
@@ -172,40 +187,50 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     return this.#dispatchTree(plan, request, requestId);
   }
 
+  /**
+   * Single-job dispatch path. The auto-selector routes size = 1 here
+   * (and size = 0 short-circuits earlier in `runMany`). Pinned
+   * `topology: 'in-do'` is forbidden at size ≥ 2 by the selector
+   * because loaders inside the Coordinator's own V8 process share its
+   * scheduler thread — fan-outs must hit the hybrid path to spread
+   * across separate leaf DO processes.
+   */
   async #dispatchInDo(
     size: number,
     request: CoordinatorFanOutRequest,
   ): Promise<{ results: RunOneResult[] }> {
+    if (size === 0) return { results: [] };
+    if (size > 1) {
+      // Defensive — the selector should have rejected this earlier.
+      throw new Error(
+        `BUG: #dispatchInDo received size=${size}; in-do is single-job only`,
+      );
+    }
     const runner = new LoaderRunner({
       loader: this.env.LOADER,
       callSite: 'do-method',
       cacheKeyStrategy: request.cacheKeyStrategy ?? 'stable',
-      workerOptions: wireToWorkerOptions(request.workerOptions, this.env as unknown as Record<string, unknown>),
+      workerOptions: wireToWorkerOptions(
+        request.workerOptions,
+        this.env as unknown as Record<string, unknown>,
+      ),
     });
-    // Fork the upstream cancel stream so each parallel loader gets its own
-    // single-reader copy. Live cancel propagates to all in-DO loaders.
-    const slice = request.argsList.slice(0, size);
-    const childStreams = forkCancelStream(request.cancelStream, slice.length);
-    const results = await Promise.all(
-      slice.map(async (args, i): Promise<RunOneResult> => {
-        try {
-          const value = await runner.runOne({
-            fnSource: request.fnSource,
-            fnHash: request.fnHash,
-            context: request.context,
-            bindings: this.env as unknown as Record<string, unknown>,
-            envelope: { ...request.envelope, mode: 'pool-fn' as const },
-            args,
-            freshIsolate: request.freshIsolate,
-            cancelStream: childStreams[i],
-          });
-          return { ok: true, value };
-        } catch (err) {
-          return errorToFailedResult(err);
-        }
-      }),
-    );
-    return { results };
+    try {
+      const value = await runner.runOne({
+        fnSource: request.fnSource,
+        fnHash: request.fnHash,
+        context: request.context,
+        bindings: this.env as unknown as Record<string, unknown>,
+        envelope: { ...request.envelope, mode: 'pool-fn' as const },
+        args: request.argsList[0],
+        freshIsolate: request.freshIsolate,
+        taskSlot: 0,
+        cancelStream: request.cancelStream,
+      });
+      return { results: [{ ok: true, value }] };
+    } catch (err) {
+      return { results: [errorToFailedResult(err)] };
+    }
   }
 
   async #dispatchHybrid(
@@ -220,23 +245,37 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     }
     const ns = this.env.CfpWorkerDO;
 
-    // Slice argsList according to the leaf shape.
+    // Slice argsList according to the leaf shape. Each leaf gets one
+    // job (`leafSize === 1` for every entry under the redesigned
+    // selector), but the slot offset is still tracked so the per-task
+    // cache key stays stable across calls regardless of how the
+    // coordinator carved the work.
     let cursor = 0;
-    const slices: unknown[][][] = [];
+    const slices: Array<{ args: unknown[][]; slotBase: number }> = [];
     for (const leafSize of plan.leafShape) {
-      slices.push(request.argsList.slice(cursor, cursor + leafSize));
+      slices.push({
+        args: request.argsList.slice(cursor, cursor + leafSize),
+        slotBase: cursor,
+      });
       cursor += leafSize;
     }
 
-    // One forked cancel stream per child WorkerDO leaf. Each leaf forks
-    // again internally for its 4 loaders.
+    // One forked cancel stream per leaf DO. Each leaf reads its own
+    // chunk to abort its single in-flight job.
     const childStreams = forkCancelStream(request.cancelStream, slices.length);
     const leafResults = await Promise.all(
-      slices.map(async (slice, leafIdx): Promise<RunOneResult[]> => {
+      slices.map(async ({ args: slice, slotBase }, leafIdx): Promise<RunOneResult[]> => {
         if (slice.length === 0) return [];
         const leafName = `${this.ctx.id.toString()}-${requestId}-leaf-${leafIdx}`;
         try {
-          return await invokeLeafBatchWithRetry(ns, leafName, request, slice, childStreams[leafIdx]);
+          return await invokeLeafBatchWithRetry(
+            ns,
+            leafName,
+            request,
+            slice,
+            slotBase,
+            childStreams[leafIdx],
+          );
         } catch (err) {
           return slice.map(() => errorToFailedResult(err));
         }
@@ -262,18 +301,24 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     }
     const ns = this.env.CfpSubCoord;
 
-    // Slice argsList per child plan size.
+    // Slice argsList per child plan size, tracking the global slot
+    // offset per sub-tree so the leaf-tier sees a contiguous global
+    // slot range. The same convention as #dispatchHybrid; here the
+    // tree just routes through one extra coordinator tier.
     const childSizes = plan.children.map((c) => c.size);
     let cursor = 0;
-    const slices: unknown[][][] = [];
+    const slices: Array<{ args: unknown[][]; slotBase: number }> = [];
     for (const childSize of childSizes) {
-      slices.push(request.argsList.slice(cursor, cursor + childSize));
+      slices.push({
+        args: request.argsList.slice(cursor, cursor + childSize),
+        slotBase: cursor,
+      });
       cursor += childSize;
     }
 
     const childStreams = forkCancelStream(request.cancelStream, slices.length);
     const subResults = await Promise.all(
-      slices.map(async (slice, subIdx): Promise<RunOneResult[]> => {
+      slices.map(async ({ args: slice, slotBase }, subIdx): Promise<RunOneResult[]> => {
         if (slice.length === 0) return [];
         const subName = `${this.ctx.id.toString()}-${requestId}-sub-${subIdx}`;
         const buildReq = (cancelStream: ReadableStream<Uint8Array> | undefined): DispatchTreeRequest => ({
@@ -289,6 +334,10 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
           depth: plan.depth - 1,
           maxFanOut: request.selector?.maxFanOut ?? 32,
           envelope: request.envelope,
+          // Global slot offset — sub-coord adds its own local index
+          // when re-slicing, preserving the global slot space all the
+          // way down to the leaf DO's LoaderRunner.
+          taskSlotBase: slotBase,
           cancelStream,
           locationHint: request.locationHint,
         });
@@ -435,31 +484,23 @@ function planSliceChildSizes(child: TreePlan | HybridPlan): number[] {
 }
 
 /**
- * Fan-out widths per level for observability (PoolStats.fanOutPerLevel).
+ * Fan-out widths per level for observability
+ * (`PoolStats.fanOutPerLevel`).
  *
- * Reports a list whose entries are the parallelism width at each tier,
- * top to bottom. For the hybrid topology that's `[leafCount, …perLeafLoaderCounts]`;
- * for the tree topology the report walks the leftmost branch top-down,
- * appending the leaf count at the deepest tier and finally the per-leaf
- * loader count (typically 4).
+ * Reports the parallelism width at each tier, top to bottom. With the
+ * one-job-per-leaf-DO model, the hybrid topology is a single tier of
+ * width `N`, and the tree topology walks the leftmost branch reporting
+ * the children-count at each coordinator tier, ending in the deepest
+ * hybrid leaf's width.
  */
 function planFanOutPerLevel(plan: TopologyPlan): number[] {
   if (plan.topology === 'in-do' || plan.topology === 'loader-only') return [plan.size];
-  if (plan.topology === 'hybrid') return [plan.leafShape.length, ...plan.leafShape];
-  // tree — root fan-out first, then walk the leftmost branch reporting
-  // the children-count at each tier; at the deepest hybrid leaf, append
-  // the leaf count AND the per-leaf loader count so the user sees all
-  // multiplicative tiers.
+  if (plan.topology === 'hybrid') return [plan.leafShape.length];
   const widths: number[] = [plan.children.length];
   let cursor: TreePlan | HybridPlan | undefined = plan.children[0];
   while (cursor) {
     if (cursor.topology === 'hybrid') {
       widths.push(cursor.leafShape.length);
-      // Per-leaf loader count (the bottommost tier that gives 4N parallelism).
-      // Use the largest leaf in the shape; balanced shapes are uniform but
-      // the tail leaf may hold a remainder.
-      const maxLoadersPerLeaf = cursor.leafShape.reduce((a, b) => Math.max(a, b), 0);
-      widths.push(maxLoadersPerLeaf);
       break;
     }
     widths.push(cursor.children.length);
@@ -491,6 +532,7 @@ async function invokeLeafBatchWithRetry(
   leafName: string,
   request: CoordinatorFanOutRequest,
   slice: unknown[][],
+  slotBase: number,
   cancelStream: ReadableStream<Uint8Array> | undefined,
 ): Promise<RunOneResult[]> {
   const MAX_RETRIES = 2;
@@ -503,6 +545,10 @@ async function invokeLeafBatchWithRetry(
     argsList: slice,
     envelope: request.envelope,
     freshIsolate: request.freshIsolate,
+    // Global slot offset for this leaf — the i-th task in `slice` will
+    // run at global slot `slotBase + i` in the leaf's LoaderRunner.
+    // See `RunBatchRequest.taskSlotBase` for the global-slot rationale.
+    taskSlotBase: slotBase,
     cancelStream: cs,
   });
 

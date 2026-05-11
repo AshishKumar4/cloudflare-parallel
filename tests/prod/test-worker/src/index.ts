@@ -498,13 +498,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         } else {
           // Note on `freshIsolate`: empirically tested with both
           // settings. With `freshIsolate: false` (default), the Worker
-          // Loader caches the isolate by ID, so multiple concurrent
-          // `runOne` calls in the same leaf share one isolate — fine
-          // for the hybrid/tree topology where 4N parallelism comes
-          // from N independent leaf DOs each running their own loaded
-          // isolate. `freshIsolate: true` at the in-do tier pays
-          // loader spin-up per call (~1s) which outweighs the
-          // 4-way-parallel-CPU win for small N. Stick with the cache.
+          // Loader caches the isolate by `(fnHash, slot)` — one
+          // isolate per leaf DO, reused warm across calls. That's the
+          // right pattern for the hybrid topology where CPU
+          // parallelism comes from N independent leaf DOs (each a
+          // separate workerd process); each leaf only ever runs one
+          // job at a time, so the cache is pure warm-reuse with no
+          // contention. `freshIsolate: true` pays loader spin-up per
+          // call (~1s) which outweighs everything for warm workloads.
           result = await pool.map(renderTile, slabs);
           const s = await pool.stats();
           stats = {
@@ -545,7 +546,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         const tasks = Math.min(body.tasks ?? 128, 512);
         // 400M darts/task → ~5.5 s on edge CPU. Per-task work has to
         // dominate the dispatch floor by ≥10× to extract the full
-        // 4N-isolate parallelism at N=128 (32 leaf DOs × 4 loaders).
+        // N-leaf parallelism at N=128 (128 leaf DOs, one job each).
         // Integer mul / mod is fast on V8 — empirically 200M darts ≈
         // 2.8 s; 400M lands around 5.5 s. The full sequential mode
         // at N=4 does 4 × 5.5 ≈ 22 s, just under the per-Worker CPU
@@ -771,10 +772,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         const population = Math.min(body.population ?? 128, 512);
         // 200k-step N-body sim with 24 bodies → ~1.5–2 s / candidate.
         // The pairwise force loop is O(N²) per step; with 24 bodies the
-        // inner loop is 276 pair force evaluations per step. The hybrid
-        // topology at N=128 splits across 32 leaf DOs × 4 loaders, so
-        // ~2 s/candidate amortizes the per-leaf dispatch (50–150 ms)
-        // by ~10×, which is what we need to clear the 50× speedup target.
+        // inner loop is 276 pair force evaluations per step. The tree
+        // topology at N=128 splits across 128 leaf DOs (one candidate
+        // each), so ~2 s/candidate amortizes the per-leaf dispatch
+        // (50–150 ms) by ~10×.
         const fitnessSteps = Math.min(body.fitnessSteps ?? 200_000, 500_000);
         const bodies = Math.min(body.bodies ?? 24, 48);
         const mode = body.mode ?? 'parallel';

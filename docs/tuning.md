@@ -6,13 +6,14 @@ Knobs you can turn to adapt the runtime to your workload.
 
 | Knob                            | Default        | When to change                                                                                                                                       |
 | ------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topology`                      | `'auto'`       | Pin to `'in-do' \| 'hybrid' \| 'tree'` for predictable latency. `'auto'` is best for variable input sizes.                                            |
+| `topology`                      | `'auto'`       | Pin to `'in-do' \| 'hybrid' \| 'tree'` for predictable latency. `'auto'` is best for variable input sizes. `'in-do'` only accepts size ≤ 1.          |
+| `maxFanOut`                     | `32`           | Per-coordinator RPC fan-out cap. Hybrid topology can dispatch up to this many leaf DOs in one Promise.all turn; sizes above auto-promote to tree.   |
 | `branchingFactor`               | `8`            | Tree fan-out width per level. `4` for narrower trees (more depth, less coordinator pressure); `16` for wider (less depth, more leaves).             |
-| `treeThreshold`                 | `256`          | Size at which auto-selector promotes from hybrid to tree. Lower if your fn is CPU-heavy and you want more leaf parallelism sooner.                  |
+| `treeThreshold`                 | `maxFanOut`    | Size at which auto-selector promotes from hybrid to tree. Defaults to `maxFanOut`. Raise (and `maxFanOut`) together to keep larger fan-outs flat.   |
 | `fanOutCap`                     | `1024`         | Hard ceiling on items per fan-out call. Beyond this, throws `TopologyError`.                                                                         |
-| `cacheKeyStrategy`              | `'stable'`     | Default reuses one isolate per fn shape — best warmth and no LRU thrash. Use `'fresh'` only when you need a clean V8 heap per call (testing, distrusted code). `'auto'` (60s windows) is opt-in for deployments with a small fixed set of shapes that want periodic refresh. |
+| `cacheKeyStrategy`              | `'stable'`     | Default uses `cfp:<fnHash>:slot-<i>` — one isolate per (fn shape, slot). Same slot across calls reuses the same warm isolate; distinct slots within a fan-out give each task its own V8 heap (memory isolation). Use `'fresh'` only when you need a clean heap per call (testing, distrusted code). `'auto'` (60s windows) is opt-in for deployments with a small fixed set of shapes that want periodic refresh. |
 | `autoWarm`                      | `true`         | When `true`, the first submit fires `Coordinator.noop()` in parallel with the real dispatch — absorbs the ~300–400 ms DO cold-start off the critical path. Set to `false` only when benchmarking cold-start specifically. Validated 14×–140× per-call speedup. |
-| `inProcess`                     | `undefined`    | Pass `ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` and small fan-outs (size ≤ 4). Per-call dispatch drops from tens of ms to ~1–3 ms.                                                          |
+| `inProcess`                     | `undefined`    | Pass `ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` (and the rare `pool.map([x], fn)` of size = 1). Per-call dispatch drops from tens of ms to ~1–3 ms. Fan-outs of size ≥ 2 always go through the Coordinator DO so each task lands in its own leaf process. |
 | `requestColo`                   | `undefined`    | Pass `req.cf?.colo as string \| undefined` so freshly-created leaf DOs colocate with the request's incoming colo. Best-effort placement, only honored on first DO access.                                                                              |
 | `locationHint`                  | `undefined`    | Explicit override for `requestColo`. One of `'wnam' \| 'enam' \| 'sam' \| 'weur' \| 'eeur' \| 'apac' \| 'oc' \| 'afr' \| 'me'`.                                                                                                          |
 | `timeout`                       | `30_000`       | Wall-clock budget per submit. Set to less than your Worker's `cpuMs` cap.                                                                            |
@@ -47,7 +48,9 @@ Knobs you can turn to adapt the runtime to your workload.
 ## Sizing the Worker
 
 For a Pool processing 1000 items at peak:
-- `'auto'` → tree (branchingFactor=8, depth=2) → 64 leaves, 256 isolates.
-- Each leaf DO is a separate Workers instance, billed separately.
-- Worker request total CPU = max(per-isolate CPU) + DO RPC overhead.
-- Memory: each loaded isolate has its own V8 heap; 50/owner LRU bounds.
+- `'auto'` → tree (branchingFactor=8, K=2) → root → 8 sub-coords → 8 leaves each → **1000 leaf DOs** (one job each).
+- Each leaf DO is a separate workerd process with its own V8 scheduler
+  thread; CPU parallelism scales with leaf count.
+- Worker request total wall = max(per-isolate CPU) + (K+1) × DO RPC hop.
+- Memory: each loaded isolate has its own V8 heap; 50/owner LRU bounds
+  per leaf process.

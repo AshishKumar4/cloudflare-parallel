@@ -31,10 +31,11 @@
 // gives us exactly that without any cross-isolate communication.
 //
 // **Critical: not a singleton across the deployment.** Each DO
-// instance has its own isolate, so each DO has its own semaphore. The
-// hybrid topology composes 4 × N parallelism precisely because the
-// `cfpLoaderSem` on `CfpWorkerDO` instance #1 is independent of the
-// one on instance #2.
+// instance has its own isolate, so each DO has its own semaphore.
+// The hybrid topology delivers `N`-way parallelism because each leaf
+// DO is a separate workerd process — `cfpLoaderSem` on `CfpWorkerDO`
+// instance #1 is independent of the one on instance #2 and each runs
+// on its own V8 scheduler thread.
 //
 // Reference: https://developers.cloudflare.com/workers/reference/how-workers-works/
 interface LoaderBudgetGlobals {

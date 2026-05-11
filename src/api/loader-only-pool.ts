@@ -105,6 +105,7 @@ export class LoaderOnlyPoolImpl<
     fn: UserFn,
     args: unknown[],
     perCallOpts: SubmitOptions | undefined,
+    taskSlot = 0,
   ): Promise<R> {
     const { fnSource, fnHash } = this.#serialize(fn);
     const envelope = buildEnvelope({
@@ -123,6 +124,7 @@ export class LoaderOnlyPoolImpl<
           envelope,
           args,
           freshIsolate: perCallOpts?.freshIsolate,
+          taskSlot,
         }),
       {
         timeout: perCallOpts?.timeout ?? this.#opts.timeout,
@@ -141,7 +143,8 @@ export class LoaderOnlyPoolImpl<
     ...rest: [...A] | [...A, SubmitOptions]
   ): Promise<Awaited<R>> {
     const { args, opts } = splitSubmitOptions(rest);
-    return this.#runOnce<Awaited<R>>(fn, args, opts);
+    // Single-shot: slot 0, compatible with future `map`'s slot-0.
+    return this.#runOnce<Awaited<R>>(fn, args, opts, 0);
   }
 
   async map<T, R>(
@@ -154,7 +157,9 @@ export class LoaderOnlyPoolImpl<
       onError: opts?.onError ?? 'throw',
       concurrency: opts?.concurrency ?? items.length,
       mode: 'map' as FanOutMode,
-      run: (item) => this.#runOnce<Awaited<R>>(fn, [item], opts),
+      // `idx` is the task position within this fan-out — exactly the
+      // `taskSlot` we need to give each task its own loader cache key.
+      run: (item, idx) => this.#runOnce<Awaited<R>>(fn, [item], opts, idx),
       cancel: opts?.cancel,
     });
   }
@@ -170,10 +175,13 @@ export class LoaderOnlyPoolImpl<
       const next: T[] = [];
       const round: Promise<T>[] = [];
       const carryIdx: Array<{ from: number; value: T }> = [];
+      let slot = 0;
       for (let i = 0; i < current.length; i += 2) {
         if (i + 1 < current.length) {
+          // Per-pair slot index so the concurrent reductions in this
+          // round each get their own isolate.
           round.push(
-            this.#runOnce<T>(fn, [current[i], current[i + 1]], undefined),
+            this.#runOnce<T>(fn, [current[i], current[i + 1]], undefined, slot++),
           );
         } else {
           carryIdx.push({ from: round.length, value: current[i] });
@@ -204,7 +212,9 @@ export class LoaderOnlyPoolImpl<
       onError: opts?.onError ?? 'throw',
       concurrency: batches.length,
       mode: 'scatter' as FanOutMode,
-      run: (batch) => this.#runOnce<Awaited<R>>(fn, [batch], opts),
+      // `idx` is the chunk position — use it as the slot so each chunk
+      // gets its own isolate.
+      run: (batch, idx) => this.#runOnce<Awaited<R>>(fn, [batch], opts, idx),
       cancel: opts?.cancel,
     });
   }
@@ -223,7 +233,7 @@ export class LoaderOnlyPoolImpl<
       const chunks: T[][] = [];
       for (let i = 0; i < items.length; i += chunkSize) chunks.push(items.slice(i, i + chunkSize));
       const results = await Promise.all(
-        chunks.map((c) => this.#runOnce<R[]>(fn, [c], undefined)),
+        chunks.map((c, idx) => this.#runOnce<R[]>(fn, [c], undefined, idx)),
       );
       return (results as Awaited<R>[][]).flat();
     };

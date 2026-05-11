@@ -237,13 +237,20 @@ describe('V3 prewarm — inProcess loopback', () => {
     };
   }
 
-  it('autoWarm + inProcess: fires a single prewarm runOne before the first runMany', async () => {
+  it('autoWarm + inProcess: fires a single prewarm runOne before the first submit', async () => {
+    // Single-shot `submit` (size=1) routes through the inProcess
+    // loopback. Fan-outs (size≥2) route through the DO Coordinator so
+    // the 4 fresh isolate compilations run on the DO's own V8 thread,
+    // not the caller Worker's (see IN_PROCESS_THRESHOLD comment in
+    // pool.ts). This test pins the loopback prewarm behaviour at the
+    // single-shot boundary.
     const inProcess = makeInProcess();
     const pool = new Pool(env, { inProcess });
-    await pool.map((x: number) => x, [1, 2]);
-    // The prewarm uses runOne (no-op), the actual fan-out uses runMany.
-    expect(inProcessRunOneCalls).toBe(1);
-    expect(inProcessRunManyCalls).toBe(1);
+    await pool.submit((x: number) => x, 42);
+    // The prewarm (`runOne` of a no-op) fires once, then the real
+    // submit hits runOne again — total = 2 runOne calls (1 prewarm + 1 real).
+    expect(inProcessRunOneCalls).toBe(2);
+    expect(inProcessRunManyCalls).toBe(0);
     // The DO Coordinator noop must NOT fire when inProcess is set —
     // there's no DO to warm; the prewarm targets the loopback isolate.
     expect(trace.filter((t) => t.kind === 'noop')).toHaveLength(0);
@@ -252,19 +259,19 @@ describe('V3 prewarm — inProcess loopback', () => {
   it('autoWarm + inProcess: prewarm fires only once across multiple submits', async () => {
     const inProcess = makeInProcess();
     const pool = new Pool(env, { inProcess });
-    await pool.map((x: number) => x, [1, 2]);
-    await pool.map((x: number) => x, [3, 4]);
-    await pool.map((x: number) => x, [5, 6]);
-    expect(inProcessRunOneCalls).toBe(1); // prewarm dedupe'd
-    expect(inProcessRunManyCalls).toBe(3); // three real fan-outs
+    await pool.submit((x: number) => x, 1);
+    await pool.submit((x: number) => x, 2);
+    await pool.submit((x: number) => x, 3);
+    // 1 prewarm + 3 real submits = 4 runOne calls.
+    expect(inProcessRunOneCalls).toBe(4);
   });
 
   it('autoWarm: false + inProcess: no prewarm fires', async () => {
     const inProcess = makeInProcess();
     const pool = new Pool(env, { inProcess, autoWarm: false });
-    await pool.map((x: number) => x, [1, 2]);
-    expect(inProcessRunOneCalls).toBe(0);
-    expect(inProcessRunManyCalls).toBe(1);
+    await pool.submit((x: number) => x, 1);
+    // No prewarm, just the real submit.
+    expect(inProcessRunOneCalls).toBe(1);
   });
 
   it('Pool.warm() + inProcess: explicit warm forces prewarm even with autoWarm: false', async () => {
@@ -275,42 +282,46 @@ describe('V3 prewarm — inProcess loopback', () => {
   });
 
   it('autoWarm + inProcess: prewarm runs concurrently with real dispatch (does not serialize)', async () => {
-    // Slow prewarm; runMany should still fire promptly.
+    // Slow prewarm; the real submit should still fire promptly.
     let prewarmResolve: (() => void) | null = null;
     const prewarmPromise = new Promise<void>((r) => {
       prewarmResolve = r;
     });
     const events: string[] = [];
+    let runOneIdx = 0;
     const inProcess = {
       runOne: async (_req: CoordinatorRunRequest) => {
-        events.push('prewarm-start');
-        await prewarmPromise;
-        events.push('prewarm-end');
+        const myIdx = runOneIdx++;
+        if (myIdx === 0) {
+          // First call is the prewarm (no-op `() => 0`); make it slow.
+          events.push('prewarm-start');
+          await prewarmPromise;
+          events.push('prewarm-end');
+        } else {
+          events.push('submit-start');
+        }
         return { ok: true as const, value: undefined };
       },
-      runMany: async (req: CoordinatorFanOutRequest) => {
-        events.push('runMany-start');
-        return {
-          results: req.argsList.map(() => ({ ok: true as const, value: undefined })),
-          topology: 'in-do' as const,
-          fanOutPerLevel: [req.argsList.length],
-          treeDepth: 1,
-        };
-      },
+      runMany: async () => ({
+        results: [],
+        topology: 'in-do' as const,
+        fanOutPerLevel: [],
+        treeDepth: 1,
+      }),
     };
     const pool = new Pool(env, { inProcess });
-    const fanOut = pool.map((x: number) => x, [1, 2]);
+    const submit = pool.submit((x: number) => x, 1);
     await new Promise((r) => setTimeout(r, 5));
     // The prewarm is still pending (we haven't called prewarmResolve
-    // yet), but the real runMany should have STARTED already — that's
+    // yet), but the real submit should have STARTED already — that's
     // the parallelism contract for the loopback path.
     expect(events).toContain('prewarm-start');
-    expect(events).toContain('runMany-start');
+    expect(events).toContain('submit-start');
     // `prewarm-end` MUST NOT have fired yet — it's gated on prewarmPromise.
     expect(events).not.toContain('prewarm-end');
     // Unblock and let everything finish.
     prewarmResolve!();
-    await fanOut;
+    await submit;
     // Now prewarm-end has fired.
     expect(events).toContain('prewarm-end');
   });
