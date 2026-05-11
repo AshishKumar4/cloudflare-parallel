@@ -7,6 +7,12 @@
 [![types](https://img.shields.io/npm/types/cloudflare-parallel)](https://www.npmjs.com/package/cloudflare-parallel)
 [![license](https://img.shields.io/npm/l/cloudflare-parallel)](LICENSE)
 
+```sh
+npm install cloudflare-parallel
+# or: bun add cloudflare-parallel
+# or: pnpm add cloudflare-parallel
+```
+
 ```ts
 import { Parallel } from 'cloudflare-parallel';
 
