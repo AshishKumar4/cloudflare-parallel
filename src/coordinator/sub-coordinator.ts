@@ -52,34 +52,47 @@ interface SubCoordSessionLike {
 export class SubCoordSession extends RpcTarget {
   readonly #env: SubCoordEnv;
   readonly #ownerId: string;
+  readonly #owner: CfpSubCoord;
 
-  constructor(env: SubCoordEnv, ownerId: string) {
+  constructor(env: SubCoordEnv, ownerId: string, owner: CfpSubCoord) {
     super();
     this.#env = env;
     this.#ownerId = ownerId;
+    this.#owner = owner;
   }
 
   async dispatch(request: DispatchTreeRequest): Promise<DispatchTreeResult> {
     // Stable leaf naming — see `CfpCoordinator.runMany` for the
     // warm-leaf rationale. `reqIdx = 0` keeps the leaf-name template
     // deterministic across dispatch calls so warm DOs are reused.
-    return dispatchOnEnv(this.#env, this.#ownerId, 0, request);
+    return dispatchOnEnv(this.#env, this.#ownerId, 0, request, this.#owner);
   }
 }
 
 export class CfpSubCoord extends DurableObject<SubCoordEnv> {
+  /**
+   * Per-instance caches for F8/F9 (see `/workspace/perf-audit-findings.md`).
+   * Leaf-DO names are stable across requests, so we amortize:
+   *   - `#leafStubCache`: skip `idFromName` SHA-256 + `ns.get` for warm leaves.
+   *   - `#prewarmedLeaves`: track which leaves have received a `noop()`
+   *     prewarm so we only fire once per leaf per sub-coord lifetime.
+   * Both maps are read/written via the helpers in `dispatchOnEnv`.
+   */
+  readonly leafStubCache = new Map<string, DurableObjectStub>();
+  readonly prewarmedLeaves = new Set<string>();
+
   /**
    * Open a pipelinable session. Subsequent `dispatch(...)` calls invoked
    * on the returned target ride the same RPC session (Cap'n Proto promise
    * pipelining).
    */
   openTreeSession(): SubCoordSession {
-    return new SubCoordSession(this.env, this.ctx.id.toString());
+    return new SubCoordSession(this.env, this.ctx.id.toString(), this);
   }
 
   /** Direct call form (kept for callers that don't need pipelining). */
   async dispatch(request: DispatchTreeRequest): Promise<DispatchTreeResult> {
-    return dispatchOnEnv(this.env, this.ctx.id.toString(), 0, request);
+    return dispatchOnEnv(this.env, this.ctx.id.toString(), 0, request, this);
   }
 
   /**
@@ -98,6 +111,7 @@ async function dispatchOnEnv(
   ownerId: string,
   reqIdx: number,
   request: DispatchTreeRequest,
+  owner: CfpSubCoord,
 ): Promise<DispatchTreeResult> {
   const { argsList, planChildSizes, depth, branchingFactor } = request;
   // Global slot offset for this sub-coord's slice — propagated down from
@@ -138,6 +152,7 @@ async function dispatchOnEnv(
           i,
           reqIdx,
           childCancelStreams[i],
+          owner,
         );
       } else {
         // Recurse into a deeper sub-coord with promise pipelining.
@@ -178,21 +193,52 @@ async function dispatchHybridLeaf(
   sliceIdx: number,
   reqIdx: number,
   cancelStream: ReadableStream<Uint8Array> | undefined,
+  owner: CfpSubCoord,
 ): Promise<RunOneResult[]> {
   // One leaf DO per job — each leaf is a separate workerd process with
   // its own V8 scheduler thread. CPU parallelism scales linearly with
   // leaf count.
-  const leafBatches: Array<{ args: unknown[][]; slotBase: number }> = slice.map(
-    (args, i) => ({ args: [args], slotBase: sliceSlotBase + i }),
-  );
+  const leafBatches: Array<{ args: unknown[][]; slotBase: number; leafName: string }> =
+    slice.map((args, i) => ({
+      args: [args],
+      slotBase: sliceSlotBase + i,
+      leafName: `${ownerId}-r${reqIdx}-leaf-${sliceIdx}-${i}`,
+    }));
   const leafCancelStreams = forkCancelStream(cancelStream, leafBatches.length);
-  const leafResults = await Promise.all(
-    leafBatches.map(async ({ args: batch, slotBase }, leafIdx): Promise<RunOneResult[]> => {
-      const stub = getStub<WorkerDOStub>(
+
+  // F9 (perf-audit-findings.md): fire `noop()` to leaves that haven't
+  // been prewarmed yet from this sub-coord instance. Unawaited — the
+  // noop rides outbound in parallel with the real dispatch and lands
+  // first; the real `runBatch` rides the warm channel.
+  for (const { leafName } of leafBatches) {
+    if (owner.prewarmedLeaves.has(leafName)) continue;
+    owner.prewarmedLeaves.add(leafName);
+    let s = owner.leafStubCache.get(leafName);
+    if (!s) {
+      s = getStub<WorkerDOStub>(
         env.CfpWorkerDO,
-        `${ownerId}-r${reqIdx}-leaf-${sliceIdx}-${leafIdx}`,
+        leafName,
         request.locationHint,
-      );
+      ) as DurableObjectStub;
+      owner.leafStubCache.set(leafName, s);
+    }
+    (s as unknown as { noop(): Promise<void> }).noop().catch(() => {
+      owner.prewarmedLeaves.delete(leafName);
+    });
+  }
+
+  const leafResults = await Promise.all(
+    leafBatches.map(async ({ args: batch, slotBase, leafName }, leafIdx): Promise<RunOneResult[]> => {
+      // F8: use the cached leaf stub.
+      let stub = owner.leafStubCache.get(leafName) as WorkerDOStub | undefined;
+      if (!stub) {
+        stub = getStub<WorkerDOStub>(
+          env.CfpWorkerDO,
+          leafName,
+          request.locationHint,
+        );
+        owner.leafStubCache.set(leafName, stub as unknown as DurableObjectStub);
+      }
       try {
         // Promise pipelining on the leaf DO.
         const session = stub.openSession();
@@ -213,6 +259,9 @@ async function dispatchHybridLeaf(
         });
         return result.results;
       } catch (err) {
+        // Invalidate cached stub on error — may be a transient leaf
+        // reset and the routing handle is stale.
+        owner.leafStubCache.delete(leafName);
         return batch.map(() => errorToFailedResult(err));
       }
     }),

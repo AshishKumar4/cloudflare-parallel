@@ -63,8 +63,8 @@ export function selectTopology(size: number, opts: SelectorOptions = {}): Topolo
   if (branchingFactor < 4 || branchingFactor > 16) {
     throw new TopologyError(`branchingFactor must be in [4,16], got ${branchingFactor}`);
   }
-  if (maxFanOut < 1 || maxFanOut > 64) {
-    throw new TopologyError(`maxFanOut must be in [1,64], got ${maxFanOut}`);
+  if (maxFanOut < 1 || maxFanOut > 256) {
+    throw new TopologyError(`maxFanOut must be in [1,256], got ${maxFanOut}`);
   }
 
   if (size === 0) {

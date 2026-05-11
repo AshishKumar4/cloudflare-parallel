@@ -111,19 +111,51 @@ async function runBatchOnEnv(
     ),
   });
 
-  // Fork the upstream cancel stream so each in-DO job gets its own
-  // single-reader copy. Live cancel propagates to all in-flight jobs.
-  const childStreams = forkCancelStream(request.cancelStream, request.argsList.length);
-
   // Global slot base for this leaf — supplied by the coordinator so the
   // i-th task in this batch maps to global slot `slotBase + i`. Distinct
   // global slots produce distinct loader cache keys, which is what
   // unlocks per-task isolate parallelism (see `cache-key.ts`).
   const slotBase = request.taskSlotBase ?? 0;
+  const N = request.argsList.length;
 
-  // The per-DO-method loader cap is enforced by `LoaderRunner`'s
-  // semaphore — we can safely Promise.all here even if a caller passes
-  // an oversized argsList; the semaphore queues anything beyond cap.
+  // F1 + F7 (perf-audit-findings.md): single-job fast path.
+  //
+  // The redesigned topology dispatches one job per leaf DO, so
+  // `argsList.length === 1` is the hot path. Specialize it to skip:
+  //   (1) `forkCancelStream(stream, 1)` — would allocate a 1-child
+  //       ReadableStream + spawn an async pump task for nothing.
+  //   (2) `Promise.all([...one])` — would allocate an array + an
+  //       arrow-fn closure + an extra microtask layer.
+  // Both savings land on the critical path at the exact moment we
+  // want the leaf to start user-fn execution.
+  if (N === 1) {
+    try {
+      const value = await runner.runOne({
+        fnSource: request.fnSource,
+        fnHash: request.fnHash,
+        context: request.context,
+        bindings: env as unknown as Record<string, unknown>,
+        envelope: {
+          ...request.envelope,
+          cancelTokenId: undefined,
+          mode: 'pool-fn' as const,
+        },
+        args: request.argsList[0],
+        freshIsolate: request.freshIsolate,
+        taskSlot: slotBase,
+        // Pass the upstream cancel stream directly; we're the only reader.
+        cancelStream: request.cancelStream,
+      });
+      return { results: [{ ok: true as const, value }] };
+    } catch (err) {
+      return { results: [errorToFailedResult(err)] };
+    }
+  }
+
+  // Multi-job batch path. The per-DO-method loader cap (cap=4) is
+  // enforced by `LoaderRunner`'s semaphore — we can safely Promise.all
+  // here; the semaphore queues anything beyond cap.
+  const childStreams = forkCancelStream(request.cancelStream, N);
   const results = await Promise.all(
     request.argsList.map(async (args, i) => {
       try {

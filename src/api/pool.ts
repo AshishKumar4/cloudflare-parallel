@@ -375,7 +375,16 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
 
   // ---- internal helpers ---------------------------------------------
 
+  /**
+   * Cached Coordinator-DO stub. The coordinator name and locationHint
+   * are constant per `Pool` instance, so `idFromName` (SHA-256 over
+   * the name) + `ns.get` is paid once per pool. See
+   * `/workspace/perf-audit-findings.md` § F12.
+   */
+  #cachedStub: (CoordinatorStub & DurableObjectStubLike) | undefined;
+
   #stub(): CoordinatorStub & DurableObjectStubLike {
+    if (this.#cachedStub) return this.#cachedStub;
     const ns = this.#env.CfpCoordinator!;
     // The DO Coordinator is a sticky, request-spanning anchor for the
     // tree/hybrid topology. `locationHint` is best-effort and only honored
@@ -393,7 +402,8 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
           ): DurableObjectStub;
         }).get(id, opts)
       : ns.get(id);
-    return stub as unknown as CoordinatorStub & DurableObjectStubLike;
+    this.#cachedStub = stub as unknown as CoordinatorStub & DurableObjectStubLike;
+    return this.#cachedStub;
   }
 
   /**

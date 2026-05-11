@@ -450,22 +450,24 @@ The library publishes live edge benchmarks in [`bench-results-live.json`](bench-
 
 ### Observed speedup curve
 
-Live numbers from the deployed test worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`). Numbers are warm (the auto-warm prewarm absorbs the cold-start path) and span the `hybrid` (2..32) and `tree` (>32) topologies. Sequential baseline is the per-tile wall multiplied by N.
+Live numbers from the deployed test worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`). Numbers are warm (the auto-warm prewarm absorbs the cold-start path), separately reported cold vs warm in [`bench-results-live.json`](bench-results-live.json). Sequential baseline is the per-tile wall multiplied by N.
 
 | Size | Topology         | Parallel wall (warm) | Sequential | **Speedup** |
 |-----:|------------------|---------------------:|-----------:|------------:|
-|    4 | `hybrid`         |               552 ms |    1.8 s   |    **3.3×** |
-|   16 | `hybrid`         |               572 ms |    7.2 s   |   **12.6×** |
-|   64 | `tree` `[8,8]`   |              1481 ms |   29.2 s   |   **19.7×** |
-|  128 | `tree` `[8,16]`  |              1470 ms |   52.5 s   |   **35.7×** |
-|  256 | `tree` `[8,32]`  |              1185 ms |  107.8 s   |   **91.0×** |
-|  512 | `tree` (depth 2) |              1457 ms |  210.4 s   |  **144.4×** |
+|    4 | `hybrid`         |               559 ms |    1.7 s   |    **3.1×** |
+|   16 | `hybrid`         |               575 ms |    6.9 s   |   **12.0×** |
+|   64 | `tree` `[8,8]`   |               734 ms |   27.2 s   |   **37.1×** |
+|  128 | `tree` `[8,16]`  |              1021 ms |   55.0 s   |   **53.9×** |
+|  256 | `tree` `[8,32]`  |               593 ms |  111.1 s   |  **187.4×** |
+|  512 | `tree` (depth 2) |               570 ms |  204.3 s   |  **358.4×** |
 
-Heavy N-body GA fitness eval hits **111× at N=512** with depth-2 tree; Monte Carlo dart-throwing hits **63× at N=256**. Full sweep + cold/warm split: [`bench-results-live.json`](bench-results-live.json).
+Heavy N-body GA fitness eval hits **28× at N=128**; Monte Carlo dart-throwing hits **30× at N=128**. Full sweep + cold/warm split: [`bench-results-live.json`](bench-results-live.json).
 
 **Where parallel CPU comes from.** Each leaf DO is a separate workerd process with its own V8 scheduler thread. The hybrid topology dispatches one job per leaf — N tasks land on N separate processes and execute concurrently. The tree topology recursively splits the fan-out so the per-coordinator RPC cap (default 32) doesn't bottleneck large workloads. Loaders *inside* a single workerd process share that process's V8 thread and serialize on CPU, so the library never bundles multiple jobs into one leaf — only DO count multiplies CPU.
 
-The library scales close to linear from N=4 upward. At N=4 the ceiling is bounded by per-leaf RPC dispatch overhead vs sequential's single-isolate hot path; from N=16 upward the parallel win dominates dramatically.
+**Where the constants come from.** A `Pool` instance caches its Coordinator-DO stub. The Coordinator DO caches its leaf-DO stubs by stable leaf name (no re-`idFromName` per dispatch). The Coordinator fires `noop()` to each leaf the first time it's seen, in parallel with the real dispatch, so the leaf's DO-creation cost (~300-400 ms) is paid off the critical path. Single-job leaves take the in-DO fast path (no `forkCancelStream`, no `Promise.all([one])`). See [`/workspace/perf-audit-findings.md`](.) for the audit that drove these.
+
+The library scales close to linear from N=4 upward. At N=4 the ceiling is bounded by one extra Coordinator-DO RPC hop (vs raw direct-DO dispatch); from N=16 upward the parallel win dominates dramatically. N=512 hits 358× — the full leaf-count parallelism amortizes RPC overhead.
 
 ### Cache key strategy
 

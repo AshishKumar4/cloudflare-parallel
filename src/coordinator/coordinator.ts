@@ -93,6 +93,112 @@ const ACTOR_STATE_KEY = 'cfp:actor-state';
 const ACTOR_INITIALIZED_KEY = 'cfp:actor-initialized';
 
 export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
+  /**
+   * Per-Coordinator-DO record of leaf-DO names that have already
+   * received a `noop()` prewarm. Stable across requests (lives for
+   * the lifetime of this DO instance). On every `runMany`, the
+   * coordinator fires `noop()` in parallel with the real dispatch
+   * for any leaf NOT yet in this set — the noop reaches the leaf
+   * first, kicks off DO creation, and the real `runBatch` rides
+   * the warm channel. Subsequent dispatches to the same leaf skip
+   * the noop entirely.
+   *
+   * This closes the cold-leaf variance that shows up at large N
+   * (some warm-run samples 3-5× the platform floor because a few
+   * leaves had been evicted between requests). See
+   * `/workspace/perf-audit-findings.md` § F9.
+   */
+  readonly #prewarmedLeaves = new Set<string>();
+
+  /**
+   * Per-Coordinator-DO leaf-stub cache. `idFromName` is a SHA-256
+   * over the leaf name; with stable leaf names across requests we
+   * can amortize the hash + `ns.get` over the DO instance's
+   * lifetime. See `/workspace/perf-audit-findings.md` § F8.
+   */
+  readonly #leafStubCache = new Map<string, DurableObjectStub>();
+
+  /**
+   * Cached `DurableObjectStub` for a leaf-DO name. First call pays
+   * `idFromName` + `ns.get`; subsequent calls hit the map.
+   * `locationHint` is honored only on first access (the runtime
+   * routes a DO once and sticks), so it's safe to pass it only on
+   * the cache-miss path.
+   */
+  #getLeafStub(
+    ns: DurableObjectNamespace,
+    leafName: string,
+    locationHint?: LocationHint,
+  ): DurableObjectStub {
+    let stub = this.#leafStubCache.get(leafName);
+    if (stub) return stub;
+    stub = getStub<WorkerDOStub>(ns, leafName, locationHint) as DurableObjectStub;
+    this.#leafStubCache.set(leafName, stub);
+    return stub;
+  }
+
+  /**
+   * Fire `noop()` against any leaf names in `leafNames` that haven't
+   * been prewarmed yet. Returns immediately — the noop promises are
+   * intentionally NOT awaited. The noop arrives at the leaf in the
+   * same workerd outbound RPC batch as the upcoming real dispatch
+   * but lands first (because it was issued first); the leaf finishes
+   * creating while the real `runBatch` rides the warm channel.
+   *
+   * After fire-and-forget, each leaf name is added to the prewarmed
+   * set so the next call skips the noop. Failed noops (e.g. DO
+   * eviction) are silently re-added on the next runMany via cache
+   * invalidation in the catch handler.
+   */
+  #schedulePrewarmLeaves(
+    ns: DurableObjectNamespace,
+    leafNames: string[],
+    locationHint?: LocationHint,
+  ): void {
+    for (const leafName of leafNames) {
+      if (this.#prewarmedLeaves.has(leafName)) continue;
+      this.#prewarmedLeaves.add(leafName);
+      const stub = this.#getLeafStub(ns, leafName, locationHint) as unknown as {
+        noop(): Promise<void>;
+      };
+      // Unawaited — the noop rides outbound in parallel with the
+      // real dispatch. We swallow any error: if noop fails, the
+      // real call will pay full cold-start cost; this is the
+      // existing behavior.
+      stub.noop().catch(() => {
+        // Drop the leaf from the prewarmed set so a future runMany
+        // retries the noop.
+        this.#prewarmedLeaves.delete(leafName);
+      });
+    }
+  }
+
+  /**
+   * Same shape as `#schedulePrewarmLeaves` but targets sub-coords
+   * (tree topology). Sub-coords carry the leaf prewarm down their
+   * own tier via `CfpSubCoord`'s own prewarm pass.
+   */
+  readonly #prewarmedSubCoords = new Set<string>();
+  readonly #subCoordStubCache = new Map<string, DurableObjectStub>();
+  #schedulePrewarmSubCoords(
+    ns: DurableObjectNamespace,
+    subNames: string[],
+    locationHint?: LocationHint,
+  ): void {
+    for (const subName of subNames) {
+      if (this.#prewarmedSubCoords.has(subName)) continue;
+      this.#prewarmedSubCoords.add(subName);
+      let stub = this.#subCoordStubCache.get(subName);
+      if (!stub) {
+        stub = getStub<SubCoordStub>(ns, subName, locationHint) as DurableObjectStub;
+        this.#subCoordStubCache.set(subName, stub);
+      }
+      (stub as unknown as { noop(): Promise<void> }).noop().catch(() => {
+        this.#prewarmedSubCoords.delete(subName);
+      });
+    }
+  }
+
   // ---- single-shot submit --------------------------------------------
 
   async runOne(request: CoordinatorRunRequest): Promise<RunOneResult> {
@@ -157,6 +263,36 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     // downstream dispatch helpers' leaf-name template (`${coordId}-
     // ${requestId}-leaf-${i}`) collapses to a deterministic name.
     const requestId = '';
+    // F9: fire `noop()` to leaves in parallel with the real dispatch.
+    // Stable leaf names make this a one-time cost per leaf across the
+    // Coordinator DO instance's lifetime. Only hybrid dispatches
+    // benefit directly (tree dispatches prewarm via the sub-coords —
+    // see CfpSubCoord); for tree we still warm the tier-1 sub-coords
+    // here.
+    if (this.env.CfpWorkerDO && plan.topology === 'hybrid') {
+      const coordId = this.ctx.id.toString();
+      const leafNames: string[] = [];
+      for (let i = 0; i < plan.leafShape.length; i++) {
+        leafNames.push(`${coordId}-${requestId}-leaf-${i}`);
+      }
+      this.#schedulePrewarmLeaves(this.env.CfpWorkerDO, leafNames, request.locationHint);
+    }
+    if (this.env.CfpSubCoord && plan.topology === 'tree') {
+      // Prewarm the F sub-coords; each sub-coord then handles its own
+      // leaf prewarm. Total warm RPCs = F at root + (avg sub-coord
+      // leaf-count) per sub-coord = comfortably within the per-DO
+      // subrequest budget.
+      const coordId = this.ctx.id.toString();
+      const subNames: string[] = [];
+      for (let i = 0; i < plan.children.length; i++) {
+        subNames.push(`${coordId}-${requestId}-sub-${i}`);
+      }
+      this.#schedulePrewarmSubCoords(
+        this.env.CfpSubCoord,
+        subNames,
+        request.locationHint,
+      );
+    }
     const dispatched = await this.#dispatchPlan(plan, request, requestId);
     return {
       results: dispatched.results,
@@ -263,14 +399,24 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     // One forked cancel stream per leaf DO. Each leaf reads its own
     // chunk to abort its single in-flight job.
     const childStreams = forkCancelStream(request.cancelStream, slices.length);
+    const coordId = this.ctx.id.toString();
     const leafResults = await Promise.all(
       slices.map(async ({ args: slice, slotBase }, leafIdx): Promise<RunOneResult[]> => {
         if (slice.length === 0) return [];
-        const leafName = `${this.ctx.id.toString()}-${requestId}-leaf-${leafIdx}`;
-        try {
-          return await invokeLeafBatchWithRetry(
+        const leafName = `${coordId}-${requestId}-leaf-${leafIdx}`;
+        // F8: stub cache. Pass a factory so retry can force a refresh
+        // (transient leaf reset invalidates the cached routing handle).
+        const stubFactory = (refresh: boolean): WorkerDOStub => {
+          if (refresh) this.#leafStubCache.delete(leafName);
+          return this.#getLeafStub(
             ns,
             leafName,
+            request.locationHint,
+          ) as unknown as WorkerDOStub;
+        };
+        try {
+          return await invokeLeafBatchWithRetry(
+            stubFactory,
             request,
             slice,
             slotBase,
@@ -317,10 +463,11 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     }
 
     const childStreams = forkCancelStream(request.cancelStream, slices.length);
+    const coordId = this.ctx.id.toString();
     const subResults = await Promise.all(
       slices.map(async ({ args: slice, slotBase }, subIdx): Promise<RunOneResult[]> => {
         if (slice.length === 0) return [];
-        const subName = `${this.ctx.id.toString()}-${requestId}-sub-${subIdx}`;
+        const subName = `${coordId}-${requestId}-sub-${subIdx}`;
         const buildReq = (cancelStream: ReadableStream<Uint8Array> | undefined): DispatchTreeRequest => ({
           fnSource: request.fnSource,
           fnHash: request.fnHash,
@@ -349,7 +496,15 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
         const MAX_RETRIES = 2;
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
           try {
-            const stub = getStub<SubCoordStub>(ns, subName, request.locationHint);
+            // F8: sub-coord stub cache. Invalidate on retry.
+            if (attempt > 0) this.#subCoordStubCache.delete(subName);
+            let stub = this.#subCoordStubCache.get(subName) as
+              | SubCoordStub
+              | undefined;
+            if (!stub) {
+              stub = getStub<SubCoordStub>(ns, subName, request.locationHint);
+              this.#subCoordStubCache.set(subName, stub as unknown as DurableObjectStub);
+            }
             const session = stub.openTreeSession();
             const result = await session.dispatch(
               buildReq(attempt === 0 ? childStreams[subIdx] : undefined),
@@ -528,8 +683,7 @@ import { isTransientLeafError } from './transient';
  * cost — the worst case is `2 × backoff_max = ~600 ms` added wall.
  */
 async function invokeLeafBatchWithRetry(
-  ns: DurableObjectNamespace,
-  leafName: string,
+  stubFactory: (refresh: boolean) => WorkerDOStub,
   request: CoordinatorFanOutRequest,
   slice: unknown[][],
   slotBase: number,
@@ -554,7 +708,9 @@ async function invokeLeafBatchWithRetry(
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const stub = getStub<WorkerDOStub>(ns, leafName, request.locationHint);
+      // Refresh the stub on retry — a transient leaf reset
+      // invalidates the cached routing handle.
+      const stub = stubFactory(attempt > 0);
       // Promise pipelining: openSession() and runBatch() ride one Cap'n
       // Proto round-trip. Reference:
       // https://developers.cloudflare.com/workers/runtime-apis/rpc/

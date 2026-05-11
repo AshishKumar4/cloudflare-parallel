@@ -6,6 +6,58 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance (dispatch-overhead audit fixes)
+
+Forensic audit of the dispatch path (see
+`/workspace/perf-audit-findings.md` for the full breakdown) identified
+five high-impact wins. Combined, they move large-N speedups
+dramatically:
+
+| N | Pre-audit speedup | Post-audit speedup |
+|---:|---:|---:|
+| 4  | 3.3× | **3.1×** (Coordinator-hop bound; not fixable without splitting the API) |
+| 16 | 12.6× | **12.0×** |
+| 64 | 19.7× | **37.1×** (1.9× lift) |
+| 128 | 35.7× | **53.9×** (1.5× lift) |
+| 256 | 91.0× | **187.4×** (2.1× lift) |
+| 512 | 144.4× | **358.4×** (2.5× lift) |
+
+Mandelbrot workload, median-of-5 warm samples with WARMUP_RUNS=4.
+
+The fixes:
+
+- **F9: Leaf-DO prewarm at dispatch entry**
+  (`src/coordinator/coordinator.ts`, `sub-coordinator.ts`). On every
+  `runMany`, the Coordinator now fires `noop()` to each leaf DO that
+  hasn't been seen yet — UNAWAITED, in parallel with the real
+  dispatch. The noop arrives at the leaf first and kicks off DO
+  creation; the real `runBatch` rides the warm channel. Tracked in a
+  per-Coordinator-DO `#prewarmedLeaves: Set<string>` so subsequent
+  fan-outs don't refire. Same pattern in `CfpSubCoord` for tree
+  leaves. Closes the cold-leaf variance that was dragging the median
+  by 3-5× the platform floor at N≥64.
+- **F1 + F7: Leaf-DO single-job fast path** (`src/coordinator/worker-do.ts`).
+  The redesigned topology dispatches one job per leaf so
+  `argsList.length === 1` is always true on the hot path. Specialize
+  it to skip `forkCancelStream(stream, 1)` (a 1-child ReadableStream
+  alloc + async pump for nothing) and `Promise.all([one])` (extra
+  microtask + array alloc). Pass the cancel stream straight through
+  to `runner.runOne`.
+- **F8: Stub caches on Coordinator + SubCoord DOs**. Each
+  Coordinator instance keeps `Map<leafName, DurableObjectStub>` and
+  `Map<subCoordName, DurableObjectStub>`. Leaf-DO names are stable
+  across requests (commit `e671cc1` already pinned this), so
+  `idFromName` (SHA-256 over the name) + `ns.get` is paid once per
+  leaf per Coordinator lifetime. Invalidated on transient leaf reset
+  so retries get a fresh routing handle.
+- **F12: Pool-instance Coordinator-stub memoization**. `Pool.#stub()`
+  now caches its single Coordinator stub on first call — saves one
+  SHA-256 + `ns.get` per `pool.map` / `pool.submit`.
+- **maxFanOut cap raised from 64 → 256** (`src/topology/selector.ts`).
+  Lets users pin single-tier hybrid shapes for larger N when they
+  want predictable latency / no tree-tier hop. Default `maxFanOut`
+  (32) and default tree-promotion behavior are unchanged.
+
 ### Changed (BREAKING — topology redesign: N parallel = N DOs, not 4N)
 
 - **The "4 loaders per leaf DO" model is gone.** The library now
