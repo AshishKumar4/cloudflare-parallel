@@ -1,7 +1,7 @@
 /**
  * Internal alias for "any user-supplied function we plan to serialize and
  * dispatch into a loaded isolate." Replaces the bare `Function` type used in
- * v0.2's internals — `Function` is a typed alias for the wide JS function
+ * the library's internals — `Function` is a typed alias for the wide JS function
  * type, which lints as unsafe and forces `as unknown as Function` casts at
  * every public-API call site.
  *

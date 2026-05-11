@@ -18,3 +18,4 @@ cloudflare-parallel-*.tgz
 examples/*/node_modules/
 examples/*/dist/
 examples/*/.wrangler/
+bench-results.json

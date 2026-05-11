@@ -3,7 +3,7 @@ import type { UserFn } from './user-fn';
 
 /**
  * Brand for "purity-validated" functions. Branding a function only checks
- * the v0.2 surface invariants (no `[native code]`, no `this`); it does not
+ * the library's serializability invariants (no `[native code]`, no `this`); it does not
  * (and cannot) prove referential transparency.
  */
 export type Pure<F> = F & { readonly __pure: true };

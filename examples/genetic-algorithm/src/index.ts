@@ -23,7 +23,7 @@ export {
   CfpWorkerDO,
   CfpSubCoord,
   CfpInProcessCoordinator,
-} from "cloudflare-parallel/durable-objects";
+} from 'cloudflare-parallel/durable-objects';
 
 interface Env {
   LOADER: WorkerLoader;

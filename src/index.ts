@@ -9,8 +9,8 @@
 export { Parallel } from './api/parallel';
 export { Pool } from './api/pool';
 export type { IPool, PipeFn } from './api/pool';
-export { LoaderOnlyPoolImpl as LoaderOnlyPool } from './api/loader-only-pool';
-export type { LoaderOnlyPool as LoaderOnlyPoolType } from './api/loader-only-pool';
+export { LoaderOnlyPoolImpl } from './api/loader-only-pool';
+export type { LoaderOnlyPool } from './api/loader-only-pool';
 export { ActorHandle } from './api/actor';
 export type { IActorHandle } from './api/actor';
 export { Scheduler } from './api/scheduler';
@@ -25,14 +25,17 @@ export { pickBindings } from './api/bindings';
 // Cancellation primitive.
 export { CancelToken } from './api/cancel';
 
-
-// Purity helpers (preserved from v0.2).
+// Purity helpers.
 export { pure, isPure, constant } from './api/primitives';
 export type { Pure } from './api/primitives';
 
 // Codegen / serialize (low-level escape hatches; most users don't need these).
 export { generateWorkerSource, buildWorkerCode, DEFAULT_COMPAT_DATE } from './loader/codegen';
-export type { WorkerCodeOptions, GenerateSourceOptions, CodegenMode } from './loader/codegen';
+export type {
+  InternalWorkerCodeOptions,
+  GenerateSourceOptions,
+  CodegenMode,
+} from './loader/codegen';
 export { serializeFunction, hashSource, canonicalizeContext } from './loader/serialize';
 export { buildCacheKey } from './loader/cache-key';
 export type { CacheKeyStrategy } from './loader/cache-key';
@@ -40,15 +43,8 @@ export type { CacheKeyStrategy } from './loader/cache-key';
 // Topology selector (escape hatch for deterministic tests).
 export { selectTopology } from './topology/selector';
 export type { Topology, SelectorOptions } from './topology/selector';
-export { balancedFill, fillCapped } from './topology/plan';
-export type {
-  TopologyName,
-  TopologyPlan,
-  InDoPlan,
-  HybridPlan,
-  TreePlan,
-  LoaderOnlyPlan,
-} from './topology/plan';
+export { balancedFill } from './topology/plan';
+export type { TopologyName, TopologyPlan, InDoPlan, HybridPlan, TreePlan } from './topology/plan';
 
 // Errors.
 export {
@@ -67,6 +63,7 @@ export {
   CancelledError,
   DeadlineExceededError,
   BackpressureError,
+  QueueFullError,
   ResultExpiredError,
   ConflictError,
   TopologyError,
@@ -82,12 +79,7 @@ export {
   isDeadlineExceededError,
   isTimeoutError,
 } from './errors/index';
-export type {
-  BillingLimitKind,
-  PartialResultEntry,
-  ErrorCode,
-  WireError,
-} from './errors/index';
+export type { BillingLimitKind, PartialResultEntry, ErrorCode, WireError } from './errors/index';
 
 // Type re-exports for option shapes.
 export type {
@@ -113,7 +105,7 @@ export type {
   SchedulerStats,
   ObservabilityOptions,
   AnalyticsEngineDataset,
-  WorkerCodeOptions as PublicWorkerCodeOptions,
+  WorkerCodeOptions,
 } from './api/options';
 
 // Worker Loader runtime types (until @cloudflare/workers-types ships them).

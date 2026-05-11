@@ -151,16 +151,7 @@ export interface DispatchTreeRequest {
    * Best-effort; only honored on first access of each DO.
    * Reference: https://developers.cloudflare.com/durable-objects/reference/data-location/
    */
-  locationHint?:
-    | 'wnam'
-    | 'enam'
-    | 'sam'
-    | 'weur'
-    | 'eeur'
-    | 'apac'
-    | 'oc'
-    | 'afr'
-    | 'me';
+  locationHint?: 'wnam' | 'enam' | 'sam' | 'weur' | 'eeur' | 'apac' | 'oc' | 'afr' | 'me';
 }
 
 export interface DispatchTreeResult {
@@ -168,21 +159,34 @@ export interface DispatchTreeResult {
 }
 
 /**
- * Marshal a thrown library error into the per-job RunOneResult failure shape
- * (NOT the standalone WireError shape — that lives in `src/errors/index.ts`
- * and is used for typed-error JSON round-trips). The two are intentionally
- * distinct: RunOneResult is the per-leaf RPC envelope; WireError is the
- * full typed-error transport.
+ * Marshal a thrown library error into the per-leaf failure record
+ * carried on the wire — `{ name, message, stack?, originalName? }`.
+ * Used by both the per-leaf `RunOneResult.error` envelope and the
+ * Scheduler's persisted-job failure column.
+ *
+ * Distinct from the standalone `WireError` shape in
+ * `src/errors/index.ts` (which carries the full typed-error transport
+ * with `code`, `httpStatus`, `extra`, `cause`).
  */
-export function errorToFailedResult(err: unknown): RunOneResult {
+export function errorToRecord(err: unknown): {
+  name: string;
+  message: string;
+  stack?: string;
+  originalName?: string;
+} {
   const e = err instanceof Error ? err : new Error(String(err));
   return {
-    ok: false,
-    error: {
-      name: e.name || 'Error',
-      message: e.message ?? '',
-      stack: e.stack,
-      originalName: (e as { originalName?: string }).originalName,
-    },
+    name: e.name || 'Error',
+    message: e.message ?? '',
+    stack: e.stack,
+    originalName: (e as { originalName?: string }).originalName,
   };
+}
+
+/**
+ * Wrap an error in the leaf-RPC failure envelope expected by
+ * `RunOneResult`. Composed from `errorToRecord`.
+ */
+export function errorToFailedResult(err: unknown): RunOneResult {
+  return { ok: false, error: errorToRecord(err) };
 }

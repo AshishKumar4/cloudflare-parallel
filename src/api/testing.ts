@@ -10,10 +10,9 @@
 
 import { hashSource, serializeFunction } from '../loader/serialize';
 import type { DispatchableFn, UserFn } from './user-fn';
-import type { CancelToken } from './cancel';
 
 import { runFanOut } from './fan-out';
-import { wireToError } from './error-decode';
+import { leafErrorToTypedError } from './error-decode';
 import { errorToFailedResult } from '../coordinator/protocol';
 import { rejectIfRpcStub, validateReturn } from '../loader/return-validator';
 import type {
@@ -48,37 +47,9 @@ interface FakeOpts<B> {
   runner?: (fn: UserFn, args: unknown[], envExtras: { signal: AbortSignal }) => Promise<unknown>;
 }
 
-const SUBMIT_OPTION_KEYS = new Set([
-  'timeout',
-  'retries',
-  'retryDelay',
-  'context',
-  'cancel',
-  'deadline',
-  'deadlineMs',
-  'freshIsolate',
-  'meta',
-]);
-
-function splitOpts<A extends unknown[]>(
-  rest: A,
-): { args: unknown[]; opts: SubmitOptions | undefined } {
-  if (rest.length === 0) return { args: [], opts: undefined };
-  const last = rest[rest.length - 1];
-  if (
-    last !== null &&
-    typeof last === 'object' &&
-    !Array.isArray(last) &&
-    !(last instanceof Date) &&
-    !(last instanceof RegExp) &&
-    !(last instanceof Map) &&
-    !(last instanceof Set) &&
-    Object.keys(last as Record<string, unknown>).every((k) => SUBMIT_OPTION_KEYS.has(k))
-  ) {
-    return { args: rest.slice(0, -1), opts: last as SubmitOptions };
-  }
-  return { args: rest as unknown[], opts: undefined };
-}
+// Shared with production `Pool` / `LoaderOnlyPool` — see
+// `src/api/submit-options.ts` for the canonical key set + matcher.
+import { splitSubmitOptions as splitOpts } from './submit-options';
 
 function defaultRunner(fn: UserFn, args: unknown[]): Promise<unknown> {
   // Structured-clone roundtrip on the user-args (NOT the trailing env, which
@@ -131,7 +102,6 @@ export function poolFake<B extends Record<string, unknown>>(
     fn: UserFn,
     items: T[],
     onError: OnErrorStrategy,
-    cancel: CancelToken | undefined,
     submitOpts?: SubmitOptions,
   ): Promise<R[]> =>
     runFanOut<T, R>({
@@ -140,7 +110,6 @@ export function poolFake<B extends Record<string, unknown>>(
       concurrency: items.length,
       mode: 'map',
       run: (item) => runOne(fn, [item], submitOpts) as Promise<R>,
-      cancel,
     });
 
   const pipe: PipeFn = ((...fns: UserFn[]) =>
@@ -172,13 +141,7 @@ export function poolFake<B extends Record<string, unknown>>(
       items: T[],
       mopts?: MapOptions,
     ): Promise<Awaited<R>[]> {
-      return fan<T, Awaited<R>>(
-        fn as UserFn,
-        items,
-        mopts?.onError ?? 'throw',
-        mopts?.cancel,
-        mopts,
-      );
+      return fan<T, Awaited<R>>(fn as UserFn, items, mopts?.onError ?? 'throw', mopts);
     },
     async scatter<T, R>(
       fn: (items: T[], env: B & { signal: AbortSignal }) => R | Promise<R>,
@@ -189,13 +152,7 @@ export function poolFake<B extends Record<string, unknown>>(
       const chunkSize = Math.ceil(items.length / chunks);
       const batches: T[][] = [];
       for (let i = 0; i < items.length; i += chunkSize) batches.push(items.slice(i, i + chunkSize));
-      return fan<T[], Awaited<R>>(
-        fn as UserFn,
-        batches,
-        sopts?.onError ?? 'throw',
-        sopts?.cancel,
-        sopts,
-      );
+      return fan<T[], Awaited<R>>(fn as UserFn, batches, sopts?.onError ?? 'throw', sopts);
     },
     async reduce<T>(
       fn: (a: T, b: T, env: B & { signal: AbortSignal }) => T | Promise<T>,
@@ -428,11 +385,15 @@ export function schedulerFake<B extends Record<string, unknown>>(
       const handle: JobHandle<R> = {
         id,
         async result(): Promise<R> {
-          if (entry.status === 'queued' || entry.status === 'running' || entry.status === 'leased') {
+          if (
+            entry.status === 'queued' ||
+            entry.status === 'running' ||
+            entry.status === 'leased'
+          ) {
             await entry.settle.promise;
           }
           if (entry.status === 'done') return entry.value as R;
-          throw wireToError(
+          throw leafErrorToTypedError(
             (entry.error as { error: { name: string; message: string; stack?: string } }).error,
           );
         },
@@ -483,9 +444,6 @@ export function schedulerFake<B extends Record<string, unknown>>(
         oldestQueuedAgeMs: 0,
         resultRetentionTtlMs: opts.resultRetention?.ttlMs ?? 3_600_000,
       };
-    },
-    attachQueue(_q: unknown): void {
-      // testing fake: no-op
     },
     async configure(c) {
       // testing fake: echo merged config; the fake doesn't actually run

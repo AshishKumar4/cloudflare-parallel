@@ -37,7 +37,15 @@ interface CtxWithExports extends ExecutionContext {
 // from D1 / R2 / KV — but those are I/O, not the demo's point.
 function corpusDoc(id: number): string {
   const tags = ['cloudflare', 'workers', 'durable-objects', 'rpc', 'isolates', 'parallel', 'edge'];
-  const verbs = ['scales', 'composes', 'fans-out', 'parallelizes', 'runs', 'dispatches', 'executes'];
+  const verbs = [
+    'scales',
+    'composes',
+    'fans-out',
+    'parallelizes',
+    'runs',
+    'dispatches',
+    'executes',
+  ];
   const nouns = ['compute', 'work', 'tasks', 'jobs', 'requests', 'isolates', 'tenants'];
   const i = id;
   return [
@@ -54,7 +62,8 @@ export default {
       return Response.json(
         {
           usage: {
-            'POST /?n=<count>': '{ query: "..." } — embed N docs in parallel + top-K cosine similarity',
+            'POST /?n=<count>':
+              '{ query: "..." } — embed N docs in parallel + top-K cosine similarity',
           },
         },
         { status: 200 },
@@ -63,7 +72,8 @@ export default {
 
     const n = Math.min(Number(url.searchParams.get('n') ?? 64), 1024);
     const k = Math.min(Number(url.searchParams.get('k') ?? 5), 50);
-    const body = req.method === 'POST' ? ((await req.json().catch(() => ({}))) as { query?: string }) : {};
+    const body =
+      req.method === 'POST' ? ((await req.json().catch(() => ({}))) as { query?: string }) : {};
     const query = body.query ?? 'cloudflare workers';
 
     const pool = Parallel.pool(env, {
@@ -87,8 +97,24 @@ export default {
       // Feature-hashing into a 256-dim float vector. ~1-3ms per doc.
       const dims = 256;
       const vec = new Array<number>(dims).fill(0);
-      const tags = ['cloudflare', 'workers', 'durable-objects', 'rpc', 'isolates', 'parallel', 'edge'];
-      const verbs = ['scales', 'composes', 'fans-out', 'parallelizes', 'runs', 'dispatches', 'executes'];
+      const tags = [
+        'cloudflare',
+        'workers',
+        'durable-objects',
+        'rpc',
+        'isolates',
+        'parallel',
+        'edge',
+      ];
+      const verbs = [
+        'scales',
+        'composes',
+        'fans-out',
+        'parallelizes',
+        'runs',
+        'dispatches',
+        'executes',
+      ];
       const nouns = ['compute', 'work', 'tasks', 'jobs', 'requests', 'isolates', 'tenants'];
       const text = [
         `Document ${id}: ${tags[id % tags.length]} ${verbs[id % verbs.length]} ${nouns[id % nouns.length]}.`,

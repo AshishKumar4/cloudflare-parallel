@@ -16,6 +16,7 @@ import type {
 import type { CancelToken } from './cancel';
 import { hashSource, serializeFunction } from '../loader/serialize';
 import { runFanOut } from './fan-out';
+import { mergeContext } from './context-merge';
 import { splitSubmitOptions } from './loader-only-pool';
 import type { UserFn } from './user-fn';
 import type {
@@ -26,6 +27,7 @@ import type {
   RunOneResult,
 } from '../coordinator/protocol';
 import {
+  getStub,
   locationHintForColo,
   workerOptionsToWire,
   type LocationHint,
@@ -36,17 +38,11 @@ import { createCancelStream } from '../transport/cancel-stream';
 import { deferred, type Deferred } from '../internal/deferred';
 import { emitObservabilityEvent } from '../observability/index';
 import { assertNoLibraryInternalBindings } from '../loader/sandbox';
-import { wireToError } from './error-decode';
+import { leafErrorToTypedError } from './error-decode';
 import { submitCodeHandler, type SubmitCodePolicy } from './submit-code-handler';
 import { pickBindings } from './bindings';
 
 const DEFAULT_COORDINATOR_NAME = 'cfp:default';
-
-// Local minimal shape — `@cloudflare/workers-types` declares this in newer
-// versions but we don't want to hard-pin to one. Runtime accepts the shape.
-interface DurableObjectNamespaceGetDurableObjectOptions {
-  locationHint?: LocationHint;
-}
 
 interface FanOutResponse {
   results: RunOneResult[];
@@ -211,9 +207,10 @@ export interface PipeFn {
  * @typeParam B user-bindings shape (e.g. `{ AI: Ai; KV: KVNamespace }`).
  * @typeParam C reserved for context-shape generic.
  */
-export class Pool<B extends Record<string, unknown>, C extends Record<string, unknown>>
-  implements IPool<B, C>
-{
+export class Pool<
+  B extends Record<string, unknown>,
+  C extends Record<string, unknown>,
+> implements IPool<B, C> {
   readonly #env: PoolEnv;
   readonly #opts: PoolOptions<B, C>;
   readonly #coordinatorName: string;
@@ -386,23 +383,14 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
   #stub(): CoordinatorStub & DurableObjectStubLike {
     if (this.#cachedStub) return this.#cachedStub;
     const ns = this.#env.CfpCoordinator!;
-    // The DO Coordinator is a sticky, request-spanning anchor for the
-    // tree/hybrid topology. `locationHint` is best-effort and only honored
-    // on first access — the cost of the cast through unknown is documented
-    // in `coordinator/internal.ts:getStub`.
-    const opts = this.#locationHint
-      ? ({ locationHint: this.#locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions)
-      : undefined;
-    const id = ns.idFromName(this.#coordinatorName);
-    const stub = opts
-      ? (ns as DurableObjectNamespace & {
-          get(
-            id: DurableObjectId,
-            opts?: DurableObjectNamespaceGetDurableObjectOptions,
-          ): DurableObjectStub;
-        }).get(id, opts)
-      : ns.get(id);
-    this.#cachedStub = stub as unknown as CoordinatorStub & DurableObjectStubLike;
+    // `locationHint` is best-effort and only honored on first access —
+    // the runtime types vary across versions, so the cast lives behind
+    // `getStub`'s `as unknown as` shim.
+    this.#cachedStub = getStub<CoordinatorStub & DurableObjectStubLike>(
+      ns,
+      this.#coordinatorName,
+      this.#locationHint,
+    );
     return this.#cachedStub;
   }
 
@@ -462,10 +450,7 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
   }
 
   #mergeContext(perCall?: Record<string, unknown>): Record<string, unknown> | undefined {
-    if (!this.#opts.context && !perCall) return undefined;
-    if (!this.#opts.context) return perCall;
-    if (!perCall) return this.#opts.context as Record<string, unknown>;
-    return { ...(this.#opts.context as Record<string, unknown>), ...perCall };
+    return mergeContext(this.#opts.context as Record<string, unknown> | undefined, perCall);
   }
 
   #selector(): CoordinatorFanOutRequest['selector'] {
@@ -522,11 +507,7 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
    *
    * @internal
    */
-  async submitSource<R>(
-    fnSource: string,
-    args: unknown[],
-    opts?: SubmitOptions,
-  ): Promise<R> {
+  async submitSource<R>(fnSource: string, args: unknown[], opts?: SubmitOptions): Promise<R> {
     const fnHash = hashSource(fnSource);
     this.#fnShapesToday.add(fnHash);
     return this.#runOneSource<R>(fnSource, fnHash, args, opts);
@@ -560,15 +541,14 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
     // stream traverses caller -> Coordinator DO -> [child DO] -> loaded
     // isolate, where it drives a real AbortController.
     const cancelWriter = opts?.cancel ? createCancelStream() : undefined;
-    let cancelOff: (() => void) | undefined;
     if (cancelWriter && opts?.cancel) {
       const tok = opts.cancel;
       if (tok.isCancelled) {
         cancelWriter.cancel(tok.poll().reason);
       } else {
-        const handler = () => cancelWriter.cancel(tok.poll().reason);
-        tok.onCancel(handler);
-        cancelOff = () => undefined; // CancelToken.onCancel is one-shot
+        // `onCancel` is one-shot — the registered handler is removed
+        // automatically after firing — so we don't need to unsubscribe.
+        tok.onCancel(() => cancelWriter.cancel(tok.poll().reason));
       }
     }
 
@@ -638,7 +618,7 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
       );
       if (!result.ok) {
         this.#failed++;
-        const err = wireToError(result.error);
+        const err = leafErrorToTypedError(result.error);
         emitObservabilityEvent(obs, {
           kind: 'taskError',
           payload: {
@@ -709,7 +689,6 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
       throw err;
     } finally {
       this.#inFlightDec(1);
-      cancelOff?.();
     }
   }
 
@@ -794,11 +773,11 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
         }
       }
       const validPairs = pairs.filter((p) => p.length === 2);
-      const valuesPromise = this.#fanOut<T>(
-        fn,
-        validPairs as unknown as unknown[][],
-        { onError: 'throw', cancel: undefined, perCall: undefined },
-      );
+      const valuesPromise = this.#fanOut<T>(fn, validPairs as unknown as unknown[][], {
+        onError: 'throw',
+        cancel: undefined,
+        perCall: undefined,
+      });
       const reduced = await valuesPromise;
       const next: T[] = [];
       let reducedIdx = 0;
@@ -930,9 +909,7 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
       const idx = cursor++;
       slots.push({
         idx,
-        promise: this.#runOne<Awaited<R>>(fn, [items[idx]], opts).then(
-          (v) => ({ idx, value: v }),
-        ),
+        promise: this.#runOne<Awaited<R>>(fn, [items[idx]], opts).then((v) => ({ idx, value: v })),
       });
     }
     while (slots.length > 0) {
@@ -945,9 +922,10 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
         const idx = cursor++;
         slots.push({
           idx,
-          promise: this.#runOne<Awaited<R>>(fn, [items[idx]], opts).then(
-            (v) => ({ idx, value: v }),
-          ),
+          promise: this.#runOne<Awaited<R>>(fn, [items[idx]], opts).then((v) => ({
+            idx,
+            value: v,
+          })),
         });
       }
     }
@@ -1147,15 +1125,13 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
     });
 
     const cancelWriter = opts.cancel ? createCancelStream() : undefined;
-    let cancelOff: (() => void) | undefined;
     if (cancelWriter && opts.cancel) {
       const tok = opts.cancel;
       if (tok.isCancelled) {
         cancelWriter.cancel(tok.poll().reason);
       } else {
-        const handler = () => cancelWriter.cancel(tok.poll().reason);
-        tok.onCancel(handler);
-        cancelOff = () => undefined;
+        // `onCancel` is one-shot; no unsubscribe needed.
+        tok.onCancel(() => cancelWriter.cancel(tok.poll().reason));
       }
     }
 
@@ -1206,7 +1182,6 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
     } finally {
       this.#inFlightDec(argsList.length);
       cancelWriter?.close();
-      cancelOff?.();
     }
 
     // Record topology decision for PoolStats.
@@ -1237,10 +1212,8 @@ export class Pool<B extends Record<string, unknown>, C extends Record<string, un
           return r.value as TRes;
         }
         this.#failed++;
-        throw wireToError(r.error);
+        throw leafErrorToTypedError(r.error);
       },
     });
   }
 }
-
-

@@ -1,0 +1,65 @@
+name: publish
+
+on:
+  push:
+    tags:
+      # Trigger on annotated version tags (`v0.3.0`, `v0.4.0`, etc.).
+      # Pre-release tags (`v0.3.1-rc.1`) also match; `npm publish` will
+      # pick up the `--tag rc.1` automatically if needed.
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: read
+  id-token: write # for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org/'
+      - name: Verify tag matches package.json version
+        # Guards against publishing a tagged commit whose version field
+        # hasn't been bumped. Strips the leading `v` from the tag.
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          PKG_VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "tag=$TAG_VERSION pkg=$PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "FAIL: tag v$TAG_VERSION does not match package.json $PKG_VERSION"
+            exit 1
+          fi
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Lint
+        run: bun run lint
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Unit tests
+        run: bun test tests/unit
+      - name: Build
+        run: bun run build
+      - name: Bundle size budget
+        run: |
+          OUT=$(npm pack --dry-run --json | tee /tmp/pack.json)
+          PACKED=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pack.json','utf8'))[0].size)")
+          UNPACKED=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pack.json','utf8'))[0].unpackedSize)")
+          echo "packed=$PACKED unpacked=$UNPACKED"
+          if [ "$PACKED" -gt 307200 ]; then echo "FAIL: packed > 300 KB"; exit 1; fi
+          if [ "$UNPACKED" -gt 1572864 ]; then echo "FAIL: unpacked > 1.5 MB"; exit 1; fi
+      - name: Publish to npm
+        # `publishConfig.access = public` lives in package.json; no
+        # `--access public` needed. `--provenance` attaches a sigstore
+        # attestation linking the published tarball to this workflow.
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

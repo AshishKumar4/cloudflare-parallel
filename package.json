@@ -44,9 +44,18 @@
     "sandbox"
   ],
   "license": "MIT",
+  "author": "Ashish Kumar <ashishkumar472@gmail.com>",
+  "homepage": "https://github.com/AshishKumar4/cloudflare-parallel#readme",
+  "bugs": {
+    "url": "https://github.com/AshishKumar4/cloudflare-parallel/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/AshishKumar4/cloudflare-parallel"
+    "url": "git+https://github.com/AshishKumar4/cloudflare-parallel.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "clean": "rm -rf dist",

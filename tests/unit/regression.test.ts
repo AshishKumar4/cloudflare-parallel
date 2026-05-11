@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 import { generateWorkerSource } from '../../src/loader/codegen';
 import { canonicalizeContext, assertValidContextKey } from '../../src/loader/serialize';
-import { Parallel } from '../../src/api/parallel';
+import { poolFake, actorFake } from '../../src/api/testing';
 import { SerializationError } from '../../src/errors/index';
 
 describe('context-key injection guard', () => {
@@ -60,7 +60,7 @@ describe('env always passed when cancel-signal injected', () => {
 
 describe('PoolStats fields wired on the poolFake surface', () => {
   it('uniqueFnShapesToday counts distinct fn shapes', async () => {
-    const fake = Parallel.testing.poolFake();
+    const fake = poolFake();
     await fake.submit((x: number) => x + 1, 1);
     await fake.submit((x: number) => x * 2, 1); // distinct shape
     await fake.submit((x: number) => x + 1, 1); // same as first
@@ -71,7 +71,7 @@ describe('PoolStats fields wired on the poolFake surface', () => {
 
 describe('Actor mode persists state across submits', () => {
   it('actorFake roundtrips state across submits', async () => {
-    const actor = Parallel.testing.actorFake<{ count: number }, Record<string, unknown>>({
+    const actor = actorFake<{ count: number }, Record<string, unknown>>({
       id: 'a',
       initialState: { count: 0 },
     });

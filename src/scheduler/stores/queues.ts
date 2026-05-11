@@ -16,7 +16,9 @@ interface CFQueue<T = unknown> {
  * `DoStorageJobStore` and **delivery** to the Queue. Claim is a no-op (the
  * Queue's consumer Worker dispatches; the SchedulerDO just bookkeeps).
  *
- * Use `Scheduler.attachQueue(env.MY_QUEUE)` to wire one.
+ * Construct via `new QueuesJobStore(env.MY_QUEUE, shadowStore)` and
+ * pass to `SchedulerOptions.store` to wire a Cloudflare Queue as the
+ * delivery backbone.
  */
 export class QueuesJobStore implements JobStore {
   readonly #queue: CFQueue<PersistedJob>;
@@ -69,9 +71,7 @@ export class QueuesJobStore implements JobStore {
     return this.#shadow.status(jobId);
   }
 
-  result(
-    jobId: string,
-  ): Promise<{
+  result(jobId: string): Promise<{
     status: JobStatus;
     value?: unknown;
     error?: { name: string; message: string; stack?: string };

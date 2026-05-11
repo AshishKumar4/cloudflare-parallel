@@ -1,11 +1,8 @@
 import { BindingError, MissingBindingError, ResultExpiredError } from '../errors/index';
 import { hashSource, serializeFunction } from '../loader/serialize';
-import { wireToError } from './error-decode';
+import { leafErrorToTypedError } from './error-decode';
 import { emitObservabilityEvent } from '../observability/index';
-import {
-  locationHintForColo,
-  type LocationHint,
-} from '../coordinator/internal';
+import { getStub, locationHintForColo, type LocationHint } from '../coordinator/internal';
 import type {
   Job,
   JobHandle,
@@ -16,12 +13,6 @@ import type {
   SchedulerStats,
 } from './options';
 import type { SchedulerEnqueueRequest } from '../scheduler/scheduler-do';
-
-// Local minimal shape — same as in `pool.ts`/`actor.ts`. Runtime accepts
-// the shape; the @cloudflare/workers-types version-pin is loose here.
-interface DurableObjectNamespaceGetDurableObjectOptions {
-  locationHint?: LocationHint;
-}
 
 interface SchedulerStub {
   enqueue(req: SchedulerEnqueueRequest): Promise<{ id: string }>;
@@ -80,7 +71,6 @@ export interface IScheduler<
   cancelByTenant(tenantId: string, reason?: string): Promise<number>;
   drain(): Promise<void>;
   stats(): Promise<SchedulerStats>;
-  attachQueue(queue: unknown): void;
   /**
    * Tune the SchedulerDO's dispatcher knobs at runtime. Returns the
    * effective config after merge. Pre-existing settings persist;
@@ -89,8 +79,10 @@ export interface IScheduler<
   configure(c: SchedulerConfigureInput): Promise<SchedulerConfigSnapshot>;
 }
 
-export class Scheduler<B extends Record<string, unknown>, C extends Record<string, unknown>>
-  implements IScheduler<B, C> {
+export class Scheduler<
+  B extends Record<string, unknown>,
+  C extends Record<string, unknown>,
+> implements IScheduler<B, C> {
   readonly #env: PoolEnv;
   readonly #opts: SchedulerOptions<B, C>;
   readonly #locationHint: LocationHint | undefined;
@@ -115,20 +107,7 @@ export class Scheduler<B extends Record<string, unknown>, C extends Record<strin
   }
 
   #stub(): SchedulerStub {
-    const ns = this.#env.CfpSchedulerDO!;
-    const id = ns.idFromName(this.#opts.id);
-    const stub = this.#locationHint
-      ? (ns as DurableObjectNamespace & {
-          get(
-            id: DurableObjectId,
-            opts?: DurableObjectNamespaceGetDurableObjectOptions,
-          ): DurableObjectStub;
-        }).get(
-          id,
-          { locationHint: this.#locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions,
-        )
-      : ns.get(id);
-    return stub as unknown as SchedulerStub;
+    return getStub<SchedulerStub>(this.#env.CfpSchedulerDO!, this.#opts.id, this.#locationHint);
   }
 
   /**
@@ -197,7 +176,7 @@ export class Scheduler<B extends Record<string, unknown>, C extends Record<strin
               kind: 'scheduler',
               payload: { ts: Date.now(), jobId: id, kind: 'cancelled' },
             });
-            throw wireToError({ name: 'CancelledError', message: 'Job cancelled' });
+            throw leafErrorToTypedError({ name: 'CancelledError', message: 'Job cancelled' });
           }
           if (r.status === 'failed') {
             const e = r.error ?? { name: 'ExecutionError', message: 'job failed' };
@@ -206,7 +185,7 @@ export class Scheduler<B extends Record<string, unknown>, C extends Record<strin
               payload: { ts: Date.now(), jobId: id, kind: 'failed', detail: e.message },
             });
             if (e.name === 'ResultExpiredError') throw new ResultExpiredError(id);
-            throw wireToError(e);
+            throw leafErrorToTypedError(e);
           }
           // queued / leased / running — long-poll.
           await new Promise((res) => setTimeout(res, jitter(DEFAULT_POLL_INTERVAL_MS)));
@@ -275,14 +254,6 @@ export class Scheduler<B extends Record<string, unknown>, C extends Record<strin
       oldestQueuedAgeMs: s.oldestQueuedAgeMs,
       resultRetentionTtlMs: this.#opts.resultRetention?.ttlMs ?? DEFAULT_RESULT_TTL,
     };
-  }
-
-  /** Hook a Cloudflare Queue's consumer into this scheduler (DESIGN §8.8). */
-  attachQueue(_queue: unknown): void {
-    // Queue consumer wiring is deployment-time (the user's Worker becomes the
-    // queue consumer). This method is a marker for the doctor CLI to
-    // recognize the integration; runtime no-op.
-    void _queue;
   }
 
   /**

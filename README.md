@@ -144,8 +144,6 @@ export default {
 };
 ```
 
-Run `npx cloudflare-parallel doctor` to scaffold the wrangler.toml additions for an existing Worker.
-
 ## Five primitives
 
 | Factory                  | Returns           | What it's for                                                    |
@@ -454,14 +452,14 @@ Live numbers from the deployed test worker (Mandelbrot tile workload, heavy inte
 
 | Size | Topology         | Parallel wall (warm) | Sequential | **Speedup** |
 |-----:|------------------|---------------------:|-----------:|------------:|
-|    4 | `hybrid`         |               559 ms |    1.7 s   |    **3.1×** |
-|   16 | `hybrid`         |               575 ms |    6.9 s   |   **12.0×** |
-|   64 | `tree` `[8,8]`   |               734 ms |   27.2 s   |   **37.1×** |
-|  128 | `tree` `[8,16]`  |              1021 ms |   55.0 s   |   **53.9×** |
-|  256 | `tree` `[8,32]`  |               593 ms |  111.1 s   |  **187.4×** |
-|  512 | `tree` (depth 2) |               570 ms |  204.3 s   |  **358.4×** |
+|    4 | `hybrid`         |               578 ms |    1.7 s   |    **3.0×** |
+|   16 | `hybrid`         |               594 ms |    6.8 s   |   **11.4×** |
+|   64 | `tree` `[8,8]`   |               753 ms |   27.3 s   |   **36.3×** |
+|  128 | `tree` `[8,16]`  |              1078 ms |   54.8 s   |   **50.8×** |
+|  256 | `tree` `[8,32]`  |               570 ms |  108.8 s   |  **190.9×** |
+|  512 | `tree` (depth 2) |               579 ms |  216.6 s   |  **374.0×** |
 
-Heavy N-body GA fitness eval hits **28× at N=128**; Monte Carlo dart-throwing hits **30× at N=128**. Full sweep + cold/warm split: [`bench-results-live.json`](bench-results-live.json).
+Heavy N-body GA fitness eval hits **33× at N=128**; Monte Carlo dart-throwing hits **11× at N=16** (Monte Carlo's per-task cost dwarfs dispatch overhead so the scaling matches Mandelbrot's). Full sweep + cold/warm split: [`bench-results-live.json`](bench-results-live.json).
 
 **Where parallel CPU comes from.** Each leaf DO is a separate workerd process with its own V8 scheduler thread. The hybrid topology dispatches one job per leaf — N tasks land on N separate processes and execute concurrently. The tree topology recursively splits the fan-out so the per-coordinator RPC cap (default 32) doesn't bottleneck large workloads. Loaders *inside* a single workerd process share that process's V8 thread and serialize on CPU, so the library never bundles multiple jobs into one leaf — only DO count multiplies CPU.
 

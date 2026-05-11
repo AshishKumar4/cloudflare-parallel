@@ -42,7 +42,12 @@ describe('buildCacheKey — taskSlot', () => {
   it('slot 0 (omitted vs explicit) — they differ; single-shot should pass `taskSlot: 0` explicitly to share with fan-out slot 0', () => {
     // No `taskSlot` → no slot suffix.
     const omitted = buildCacheKey({ fnSource: FN, contextHash: CTX, strategy: 'stable' });
-    const explicit = buildCacheKey({ fnSource: FN, contextHash: CTX, strategy: 'stable', taskSlot: 0 });
+    const explicit = buildCacheKey({
+      fnSource: FN,
+      contextHash: CTX,
+      strategy: 'stable',
+      taskSlot: 0,
+    });
     // These are intentionally different — omitted is the legacy
     // single-key behaviour; explicit slot-0 is the fan-out's slot-0.
     expect(omitted).not.toBe(explicit);
@@ -61,8 +66,18 @@ describe('buildCacheKey — taskSlot', () => {
   });
 
   it('distinct fns produce distinct keys at the same slot', () => {
-    const a = buildCacheKey({ fnSource: '(x) => x * 2', contextHash: CTX, strategy: 'stable', taskSlot: 0 });
-    const b = buildCacheKey({ fnSource: '(x) => x + 1', contextHash: CTX, strategy: 'stable', taskSlot: 0 });
+    const a = buildCacheKey({
+      fnSource: '(x) => x * 2',
+      contextHash: CTX,
+      strategy: 'stable',
+      taskSlot: 0,
+    });
+    const b = buildCacheKey({
+      fnSource: '(x) => x + 1',
+      contextHash: CTX,
+      strategy: 'stable',
+      taskSlot: 0,
+    });
     expect(a).not.toBe(b);
   });
 

@@ -18,7 +18,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { Parallel } from '../../src/api/parallel';
+import { poolFake } from '../../src/api/testing';
 import { submitCodeHandler } from '../../src/api/submit-code-handler';
 import { bearerAuth } from '../../src/api/auth';
 import { LIBRARY_INTERNAL_BINDINGS } from '../../src/loader/sandbox';
@@ -46,7 +46,7 @@ describe('submitCodeHandler — security policy', () => {
     // We need a real-ish Pool, but only at the type level — the auth path
     // rejects before any pool method is called. A throwaway fake works.
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'auth', auth: () => false },
     });
     const res = await handler(makeReq({ fn: '() => 1' }));
@@ -55,7 +55,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('runs submitted code when auth passes', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'auth', auth: () => true },
     });
     const res = await handler(makeReq({ fn: '(a, b) => a + b', args: [3, 4] }));
@@ -66,7 +66,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('rejects non-POST with 405', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'public' },
     });
     const res = await handler(new Request('https://example.test/run', { method: 'GET' }));
@@ -75,7 +75,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('rejects oversized body with 413', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'public', maxBytes: 50 },
     });
     const big = JSON.stringify({ fn: '() => 1', args: ['x'.repeat(100)] });
@@ -85,7 +85,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('rejects oversized fn source with 400', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'public', maxFnSourceBytes: 20 },
     });
     const res = await handler(makeReq({ fn: '(' + 'a'.repeat(100) + ') => a' }));
@@ -94,7 +94,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('runs onSubmit hook; throwing rejects with 429', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: {
         kind: 'public',
         onSubmit: () => {
@@ -107,7 +107,7 @@ describe('submitCodeHandler — security policy', () => {
   });
 
   it('allowBindings restricts which user bindings reach submitted code', async () => {
-    const pool = Parallel.testing.poolFake<{ KV: string; INTERNAL: string }>({
+    const pool = poolFake<{ KV: string; INTERNAL: string }>({
       bindings: { KV: 'kv-stub', INTERNAL: 'secret' },
     });
     const handler = submitCodeHandler({
@@ -127,7 +127,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('rejects oversized body via Content-Length pre-check (no buffering)', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'public', maxBytes: 1024 },
     });
     // Lie about Content-Length to trip the early check.
@@ -142,7 +142,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('rejects oversized body via streamed byte count when no Content-Length', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'public', maxBytes: 64 },
     });
     // 200 bytes, no Content-Length (we set the header explicitly to '' to
@@ -154,7 +154,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('maxBytes is byte-counted (multi-byte UTF-8 inflates)', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       // 100-byte budget. A 30-char string of 4-byte emoji is 120 bytes.
       policy: { kind: 'public', maxBytes: 100 },
     });
@@ -166,7 +166,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('public-policy errors redact stack/cause; auth errors expose them', async () => {
     const pubHandler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'public' },
     });
     const pubRes = await pubHandler(makeReq({ fn: '() => { throw new Error("internal"); }' }));
@@ -176,12 +176,10 @@ describe('submitCodeHandler — security policy', () => {
     expect(pubBody.error.code).toMatch(/^CFP_/);
 
     const authHandler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'auth', auth: () => true },
     });
-    const authRes = await authHandler(
-      makeReq({ fn: '() => { throw new Error("internal"); }' }),
-    );
+    const authRes = await authHandler(makeReq({ fn: '() => { throw new Error("internal"); }' }));
     const authBody = (await authRes.json()) as { ok: false; error: Record<string, unknown> };
     // stack may or may not be present depending on the error class — but
     // the wire shape allows it for auth callers; for public it's redacted.
@@ -190,7 +188,7 @@ describe('submitCodeHandler — security policy', () => {
 
   it('returns typed WireError JSON on user-fn throws', async () => {
     const handler = submitCodeHandler({
-      pool: Parallel.testing.poolFake() as never,
+      pool: poolFake() as never,
       policy: { kind: 'public' },
     });
     const res = await handler(makeReq({ fn: '() => { throw new Error("boom"); }' }));
@@ -213,9 +211,7 @@ describe('library-internal bindings blocklist (defense-in-depth)', () => {
   });
 
   it('isLibraryInternalKey blocks future Cfp* DOs via prefix check', async () => {
-    const { isLibraryInternalKey, sanitizeBindings } = await import(
-      '../../src/loader/sandbox.js'
-    );
+    const { isLibraryInternalKey, sanitizeBindings } = await import('../../src/loader/sandbox.js');
     // Hardcoded set members.
     expect(isLibraryInternalKey('CfpCoordinator')).toBe(true);
     expect(isLibraryInternalKey('CfpSchedulerDO')).toBe(true);

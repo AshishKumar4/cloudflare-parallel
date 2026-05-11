@@ -1,7 +1,7 @@
 import type { JobStatus } from '../../api/options';
 import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /**
  * Default JobStore: the SchedulerDO's own SQLite storage.
@@ -27,6 +27,7 @@ export class DoStorageJobStore implements JobStore {
     const row = [...this.#sql.exec(`SELECT value FROM cfp_meta WHERE key = 'schema'`)] as Array<{
       value: string;
     }>;
+    const currentSchema = row.length > 0 ? Number(row[0].value) : 0;
     if (row.length === 0) {
       this.#sql.exec(
         `INSERT INTO cfp_meta(key, value) VALUES ('schema', ?)`,
@@ -53,8 +54,21 @@ export class DoStorageJobStore implements JobStore {
       result BLOB,
       result_expires_ms INTEGER,
       error TEXT,
-      idempotency_key TEXT UNIQUE
+      idempotency_key TEXT UNIQUE,
+      cache_key_strategy TEXT
     )`);
+    // Migration: schema v1 → v2 adds cache_key_strategy column.
+    // SQLite ALTER TABLE ... ADD COLUMN is idempotent for existing
+    // deployments — column is nullable and defaults to NULL (which
+    // the runtime treats as `'stable'`).
+    if (currentSchema > 0 && currentSchema < 2) {
+      try {
+        this.#sql.exec(`ALTER TABLE jobs ADD COLUMN cache_key_strategy TEXT`);
+      } catch {
+        // Column already exists (race or partial migration); fine.
+      }
+      this.#sql.exec(`UPDATE cfp_meta SET value = ? WHERE key = 'schema'`, String(SCHEMA_VERSION));
+    }
     this.#sql.exec(
       `CREATE INDEX IF NOT EXISTS jobs_status_tenant_created ON jobs(status, tenant_id, created_at)`,
     );
@@ -80,8 +94,8 @@ export class DoStorageJobStore implements JobStore {
         `INSERT INTO jobs (
           id, tenant_id, fn_hash, fn_source, args, context, meta,
           created_at, deadline_ms, retry_max, retry_count, retry_base_ms, retry_backoff,
-          status, idempotency_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+          status, idempotency_key, cache_key_strategy
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
         job.id,
         job.tenantId,
         job.fnHash,
@@ -96,6 +110,7 @@ export class DoStorageJobStore implements JobStore {
         job.retry.baseMs,
         job.retry.backoff,
         job.idempotencyKey ?? null,
+        job.cacheKeyStrategy ?? null,
       );
       this.#emit(job.id, 'enqueued');
     } catch (err) {
@@ -400,6 +415,7 @@ type JobsRow = {
   result_expires_ms: number | null;
   error: string | null;
   idempotency_key: string | null;
+  cache_key_strategy: string | null;
 };
 
 function rowToJob(row: JobsRow): PersistedJob {
@@ -426,6 +442,9 @@ function rowToJob(row: JobsRow): PersistedJob {
     resultExpiresMs: row.result_expires_ms ?? undefined,
     error: row.error ? JSON.parse(row.error) : undefined,
     idempotencyKey: row.idempotency_key ?? undefined,
+    cacheKeyStrategy: row.cache_key_strategy
+      ? (row.cache_key_strategy as 'stable' | 'fresh' | 'auto')
+      : undefined,
   };
 }
 

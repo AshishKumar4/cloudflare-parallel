@@ -40,8 +40,7 @@
 import { writeFileSync } from 'node:fs';
 
 const TARGET =
-  process.env.CFP_E2E_TARGET ??
-  'https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev';
+  process.env.CFP_E2E_TARGET ?? 'https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev';
 
 // Sizes / samples / warmup runs are configurable via env so bench runs
 // can be scoped down for quick directional checks (e.g.
@@ -81,11 +80,7 @@ interface GaResponse extends BaseResponse {
   population: number;
 }
 
-type WorkloadResponse =
-  | MandelbrotResponse
-  | MonteCarloResponse
-  | PowResponse
-  | GaResponse;
+type WorkloadResponse = MandelbrotResponse | MonteCarloResponse | PowResponse | GaResponse;
 
 type WithRt<T> = T & { _clientRtMs: number };
 
@@ -189,10 +184,7 @@ interface Aggregate {
   perTaskSampleMs: number;
 }
 
-async function runOne(
-  cfg: WorkloadConfig,
-  size: number,
-): Promise<Aggregate> {
+async function runOne(cfg: WorkloadConfig, size: number): Promise<Aggregate> {
   const path = cfg.path;
   const parallelBody = cfg.parallelBody(size);
 
@@ -250,7 +242,8 @@ async function runOne(
     perTaskSampleMs = median(seqSamples);
     sequentialExtrapolatedMs = perTaskSampleMs * size;
     speedup = parallelWarmMs > 0 ? +(sequentialExtrapolatedMs / parallelWarmMs).toFixed(2) : 0;
-    speedupColdParallel = parallelColdMs > 0 ? +(sequentialExtrapolatedMs / parallelColdMs).toFixed(2) : 0;
+    speedupColdParallel =
+      parallelColdMs > 0 ? +(sequentialExtrapolatedMs / parallelColdMs).toFixed(2) : 0;
   }
 
   return {
@@ -309,8 +302,7 @@ async function main(): Promise<void> {
       samples: SAMPLES,
       coldDefinition:
         'first measured run after warmup — captures any per-call dispatch cost not amortized by warmup',
-      warmDefinition:
-        'median of remaining samples after the cold run — steady-state throughput',
+      warmDefinition: 'median of remaining samples after the cold run — steady-state throughput',
       sequentialDefinition:
         'per-task wall-clock from a single inline run (sequential-sample mode), multiplied by N',
       timerNote:

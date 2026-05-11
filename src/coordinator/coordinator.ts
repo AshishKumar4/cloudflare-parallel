@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { WorkerLoader } from '../types';
 import { LoaderRunner } from '../loader/runner';
-import { selectTopology } from '../topology/selector';
+import { DEFAULT_MAX_FAN_OUT, selectTopology } from '../topology/selector';
 import type { HybridPlan, TopologyPlan, TreePlan } from '../topology/plan';
 import {
   errorToFailedResult,
@@ -14,6 +14,9 @@ import {
 } from './protocol';
 import { getStub, wireToWorkerOptions, type LocationHint } from './internal';
 import { forkCancelStream } from '../transport/cancel-stream';
+// Transient-error matchers live in a standalone module so unit tests
+// don't have to load `cloudflare:workers` to exercise them.
+import { isTransientLeafError } from './transient';
 import type { WorkerDOSession } from './worker-do';
 
 /**
@@ -91,6 +94,29 @@ export interface CoordinatorFanOutRequest {
 
 const ACTOR_STATE_KEY = 'cfp:actor-state';
 const ACTOR_INITIALIZED_KEY = 'cfp:actor-initialized';
+
+/**
+ * Maximum retries on transient platform errors (DO reset, "Network
+ * connection lost") across both the leaf-batch dispatch and the
+ * sub-coord tree-dispatch paths.
+ */
+const MAX_TRANSIENT_RETRIES = 2;
+
+/**
+ * Jittered backoff between transient-retry attempts.
+ *
+ *   attempt=0 → 100..250 ms
+ *   attempt=1 → 250..400 ms
+ *   attempt=2 → 400..550 ms
+ *
+ * Spreads the retry burst across a few hundred ms so the runtime sees
+ * a sustained ramp rather than a thundering herd.
+ */
+function transientBackoff(attempt: number): Promise<void> {
+  const base = 100 + attempt * 150;
+  const jitter = Math.random() * 150;
+  return new Promise((resolve) => setTimeout(resolve, base + jitter));
+}
 
 export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
   /**
@@ -206,7 +232,10 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
       loader: this.env.LOADER,
       callSite: 'do-method',
       cacheKeyStrategy: request.cacheKeyStrategy ?? 'stable',
-      workerOptions: wireToWorkerOptions(request.workerOptions, this.env as unknown as Record<string, unknown>),
+      workerOptions: wireToWorkerOptions(
+        request.workerOptions,
+        this.env as unknown as Record<string, unknown>,
+      ),
       allowList: request.allowList,
     });
     try {
@@ -287,16 +316,12 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
       for (let i = 0; i < plan.children.length; i++) {
         subNames.push(`${coordId}-${requestId}-sub-${i}`);
       }
-      this.#schedulePrewarmSubCoords(
-        this.env.CfpSubCoord,
-        subNames,
-        request.locationHint,
-      );
+      this.#schedulePrewarmSubCoords(this.env.CfpSubCoord, subNames, request.locationHint);
     }
     const dispatched = await this.#dispatchPlan(plan, request, requestId);
     return {
       results: dispatched.results,
-      topology: plan.topology === 'loader-only' ? 'in-do' : plan.topology,
+      topology: plan.topology,
       fanOutPerLevel: planFanOutPerLevel(plan),
       treeDepth: plan.topology === 'tree' ? plan.depth : 1,
     };
@@ -307,12 +332,6 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     request: CoordinatorFanOutRequest,
     requestId: string,
   ): Promise<{ results: RunOneResult[] }> {
-    if (plan.topology === 'loader-only') {
-      // Auto-selector never returns loader-only. If a caller pins this
-      // topology, they should have used Parallel.loaderOnly() instead.
-      throw new Error('BUG: loader-only topology should not reach the Coordinator DO');
-    }
-
     if (plan.topology === 'in-do') {
       return this.#dispatchInDo(plan.size, request);
     }
@@ -338,9 +357,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     if (size === 0) return { results: [] };
     if (size > 1) {
       // Defensive — the selector should have rejected this earlier.
-      throw new Error(
-        `BUG: #dispatchInDo received size=${size}; in-do is single-job only`,
-      );
+      throw new Error(`BUG: #dispatchInDo received size=${size}; in-do is single-job only`);
     }
     const runner = new LoaderRunner({
       loader: this.env.LOADER,
@@ -408,11 +425,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
         // (transient leaf reset invalidates the cached routing handle).
         const stubFactory = (refresh: boolean): WorkerDOStub => {
           if (refresh) this.#leafStubCache.delete(leafName);
-          return this.#getLeafStub(
-            ns,
-            leafName,
-            request.locationHint,
-          ) as unknown as WorkerDOStub;
+          return this.#getLeafStub(ns, leafName, request.locationHint) as unknown as WorkerDOStub;
         };
         try {
           return await invokeLeafBatchWithRetry(
@@ -468,7 +481,9 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
       slices.map(async ({ args: slice, slotBase }, subIdx): Promise<RunOneResult[]> => {
         if (slice.length === 0) return [];
         const subName = `${coordId}-${requestId}-sub-${subIdx}`;
-        const buildReq = (cancelStream: ReadableStream<Uint8Array> | undefined): DispatchTreeRequest => ({
+        const buildReq = (
+          cancelStream: ReadableStream<Uint8Array> | undefined,
+        ): DispatchTreeRequest => ({
           fnSource: request.fnSource,
           fnHash: request.fnHash,
           context: request.context,
@@ -479,7 +494,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
           planChildSizes: planSliceChildSizes(plan.children[subIdx]),
           branchingFactor: plan.branchingFactor,
           depth: plan.depth - 1,
-          maxFanOut: request.selector?.maxFanOut ?? 32,
+          maxFanOut: request.selector?.maxFanOut ?? DEFAULT_MAX_FAN_OUT,
           envelope: request.envelope,
           // Global slot offset — sub-coord adds its own local index
           // when re-slicing, preserving the global slot space all the
@@ -488,19 +503,16 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
           cancelStream,
           locationHint: request.locationHint,
         });
-        // Same retry policy as `invokeLeafBatchWithRetry`: up to 2
-        // retries on transient platform errors, jittered backoff to
-        // avoid retry thundering herds. See that helper for the
-        // rationale; tree dispatch hits the same DO creation pressure
-        // at large N.
-        const MAX_RETRIES = 2;
-        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        // Same retry policy as `invokeLeafBatchWithRetry`: up to
+        // `MAX_TRANSIENT_RETRIES` retries on transient platform errors,
+        // jittered backoff (`transientBackoff`) to avoid retry
+        // thundering herds. Tree dispatch hits the same DO creation
+        // pressure as the hybrid leaf path at large N.
+        for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
           try {
             // F8: sub-coord stub cache. Invalidate on retry.
             if (attempt > 0) this.#subCoordStubCache.delete(subName);
-            let stub = this.#subCoordStubCache.get(subName) as
-              | SubCoordStub
-              | undefined;
+            let stub = this.#subCoordStubCache.get(subName) as SubCoordStub | undefined;
             if (!stub) {
               stub = getStub<SubCoordStub>(ns, subName, request.locationHint);
               this.#subCoordStubCache.set(subName, stub as unknown as DurableObjectStub);
@@ -511,12 +523,10 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
             );
             return result.results;
           } catch (err) {
-            if (!isTransientLeafError(err) || attempt === MAX_RETRIES) {
+            if (!isTransientLeafError(err) || attempt === MAX_TRANSIENT_RETRIES) {
               return slice.map(() => errorToFailedResult(err));
             }
-            const base = 100 + attempt * 150;
-            const jitter = Math.random() * 150;
-            await new Promise<void>((resolve) => setTimeout(resolve, base + jitter));
+            await transientBackoff(attempt);
           }
         }
         return slice.map(() => errorToFailedResult(new Error('sub-coord retry exhausted')));
@@ -559,7 +569,10 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
       loader: this.env.LOADER,
       callSite: 'do-method',
       cacheKeyStrategy: req.cacheKeyStrategy ?? 'stable',
-      workerOptions: wireToWorkerOptions(req.workerOptions, this.env as unknown as Record<string, unknown>),
+      workerOptions: wireToWorkerOptions(
+        req.workerOptions,
+        this.env as unknown as Record<string, unknown>,
+      ),
     });
     try {
       // Actor mode dispatches the actor-class codegen. The runner
@@ -649,7 +662,7 @@ function planSliceChildSizes(child: TreePlan | HybridPlan): number[] {
  * hybrid leaf's width.
  */
 function planFanOutPerLevel(plan: TopologyPlan): number[] {
-  if (plan.topology === 'in-do' || plan.topology === 'loader-only') return [plan.size];
+  if (plan.topology === 'in-do') return [plan.size];
   if (plan.topology === 'hybrid') return [plan.leafShape.length];
   const widths: number[] = [plan.children.length];
   let cursor: TreePlan | HybridPlan | undefined = plan.children[0];
@@ -663,10 +676,6 @@ function planFanOutPerLevel(plan: TopologyPlan): number[] {
   }
   return widths;
 }
-
-// Transient-error matchers live in a standalone module so unit tests
-// don't have to load `cloudflare:workers` to exercise them.
-import { isTransientLeafError } from './transient';
 
 /**
  * Invoke `runBatch` on a leaf DO with up to 2 auto-retries on transient
@@ -689,7 +698,6 @@ async function invokeLeafBatchWithRetry(
   slotBase: number,
   cancelStream: ReadableStream<Uint8Array> | undefined,
 ): Promise<RunOneResult[]> {
-  const MAX_RETRIES = 2;
   const buildBatch = (cs: ReadableStream<Uint8Array> | undefined): RunBatchRequest => ({
     fnSource: request.fnSource,
     fnHash: request.fnHash,
@@ -706,7 +714,7 @@ async function invokeLeafBatchWithRetry(
     cancelStream: cs,
   });
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
     try {
       // Refresh the stub on retry — a transient leaf reset
       // invalidates the cached routing handle.
@@ -723,13 +731,8 @@ async function invokeLeafBatchWithRetry(
       const result = await session.runBatch(buildBatch(attempt === 0 ? cancelStream : undefined));
       return result.results;
     } catch (err) {
-      if (!isTransientLeafError(err) || attempt === MAX_RETRIES) throw err;
-      // Jittered backoff: 100–250 ms on attempt 1, 250–500 ms on attempt 2.
-      // Spreads the retry burst out so the runtime sees a sustained ramp
-      // rather than another thundering herd.
-      const base = 100 + attempt * 150;
-      const jitter = Math.random() * 150;
-      await new Promise<void>((resolve) => setTimeout(resolve, base + jitter));
+      if (!isTransientLeafError(err) || attempt === MAX_TRANSIENT_RETRIES) throw err;
+      await transientBackoff(attempt);
     }
   }
   // Unreachable — the loop either returns or rethrows.

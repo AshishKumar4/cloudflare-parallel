@@ -60,7 +60,7 @@ And re-export the DO classes from your worker's entry:
 export { CfpCoordinator, CfpWorkerDO, CfpSubCoord } from 'cloudflare-parallel/durable-objects';
 ```
 
-Or run `npx cloudflare-parallel doctor` to scaffold this.
+See the README "Wiring up" section for the full wrangler.toml snippet.
 
 ### "this is undefined inside my user fn"
 
@@ -147,4 +147,3 @@ because `ServiceStub` itself isn't structured-clone-safe.
 - `pool.observability.hooks.onTaskError` fires for every failure.
 - Check tail worker output — `console.log` from inside loaded isolates
   shows up in tail.
-- Run `npx cloudflare-parallel doctor` to validate your wrangler.toml.

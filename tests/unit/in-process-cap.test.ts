@@ -27,10 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC = readFileSync(
-  resolve(__dirname, '../../src/coordinator/in-process.ts'),
-  'utf-8',
-);
+const SRC = readFileSync(resolve(__dirname, '../../src/coordinator/in-process.ts'), 'utf-8');
 
 describe('CfpInProcessCoordinator loader-cap', () => {
   it('runOne uses callSite: do-method (cap=4), not fetch-handler (cap=3)', () => {

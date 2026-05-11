@@ -12,8 +12,9 @@ import type { UserFn } from './user-fn';
 import { buildEnvelope } from '../transport/deadline-prop';
 import { dispatchWithResilience } from '../transport/rpc-client';
 import { runFanOut, type FanOutMode } from './fan-out';
+import { mergeContext } from './context-merge';
+import { splitSubmitOptions } from './submit-options';
 import type { PoolEnv } from './options';
-
 
 /**
  * Type-narrowed Pool returned by `Parallel.loaderOnly()`. Structurally smaller
@@ -95,10 +96,7 @@ export class LoaderOnlyPoolImpl<
   }
 
   #mergeContext(perCall?: Record<string, unknown>): Record<string, unknown> | undefined {
-    if (!this.#opts.context && !perCall) return undefined;
-    if (!this.#opts.context) return perCall;
-    if (!perCall) return this.#opts.context as Record<string, unknown>;
-    return { ...(this.#opts.context as Record<string, unknown>), ...perCall };
+    return mergeContext(this.#opts.context as Record<string, unknown> | undefined, perCall);
   }
 
   async #runOnce<R>(
@@ -160,7 +158,6 @@ export class LoaderOnlyPoolImpl<
       // `idx` is the task position within this fan-out — exactly the
       // `taskSlot` we need to give each task its own loader cache key.
       run: (item, idx) => this.#runOnce<Awaited<R>>(fn, [item], opts, idx),
-      cancel: opts?.cancel,
     });
   }
 
@@ -180,9 +177,7 @@ export class LoaderOnlyPoolImpl<
         if (i + 1 < current.length) {
           // Per-pair slot index so the concurrent reductions in this
           // round each get their own isolate.
-          round.push(
-            this.#runOnce<T>(fn, [current[i], current[i + 1]], undefined, slot++),
-          );
+          round.push(this.#runOnce<T>(fn, [current[i], current[i + 1]], undefined, slot++));
         } else {
           carryIdx.push({ from: round.length, value: current[i] });
           round.push(Promise.resolve(current[i]));
@@ -215,7 +210,6 @@ export class LoaderOnlyPoolImpl<
       // `idx` is the chunk position — use it as the slot so each chunk
       // gets its own isolate.
       run: (batch, idx) => this.#runOnce<Awaited<R>>(fn, [batch], opts, idx),
-      cancel: opts?.cancel,
     });
   }
 
@@ -240,42 +234,6 @@ export class LoaderOnlyPoolImpl<
   }
 }
 
-// ---- shared helpers (kept in this file because LoaderOnly-only) ------
-
-export function splitSubmitOptions<A extends unknown[]>(
-  rest: A,
-): { args: unknown[]; opts: SubmitOptions | undefined } {
-  if (rest.length === 0) return { args: [], opts: undefined };
-  const last = rest[rest.length - 1];
-  if (isSubmitOptionsBag(last)) {
-    return { args: rest.slice(0, -1) as unknown[], opts: last as SubmitOptions };
-  }
-  return { args: rest as unknown[], opts: undefined };
-}
-
-const SUBMIT_OPTION_KEYS = new Set([
-  'timeout',
-  'retries',
-  'retryDelay',
-  'context',
-  'cancel',
-  'deadline',
-  'deadlineMs',
-  'freshIsolate',
-  'meta',
-]);
-
-export function isSubmitOptionsBag(value: unknown): value is SubmitOptions {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  if (
-    value instanceof Date ||
-    value instanceof RegExp ||
-    value instanceof Map ||
-    value instanceof Set
-  ) {
-    return false;
-  }
-  const keys = Object.keys(value as Record<string, unknown>);
-  if (keys.length === 0) return false;
-  return keys.every((k) => SUBMIT_OPTION_KEYS.has(k));
-}
+// Submit-options helpers live in `./submit-options`. Re-export for
+// callers that already import them from here.
+export { isSubmitOptionsBag, splitSubmitOptions } from './submit-options';

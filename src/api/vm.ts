@@ -12,10 +12,7 @@ export interface VMHandle {
   fetch(req: Request, ctx?: ExecutionContext): Promise<Response>;
 }
 
-export function vm<B extends Record<string, unknown>>(
-  env: PoolEnv,
-  opts: VMOptions<B>,
-): VMHandle {
+export function vm<B extends Record<string, unknown>>(env: PoolEnv, opts: VMOptions<B>): VMHandle {
   // Prefer the flat shape. If caller passes `pool: PoolOptions<B>`
   // we use that; otherwise pull pool fields off the top-level VMOptions.
   // VMOptions extends PoolOptions, so the top-level fields are valid

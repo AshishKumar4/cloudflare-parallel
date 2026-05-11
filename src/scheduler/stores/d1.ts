@@ -35,9 +35,17 @@ export class D1JobStore implements JobStore {
         result TEXT,
         result_expires_ms INTEGER,
         error TEXT,
-        idempotency_key TEXT UNIQUE
+        idempotency_key TEXT UNIQUE,
+        cache_key_strategy TEXT
       )`,
     );
+    // Best-effort migration for D1 deployments created at schema v1.
+    // ALTER TABLE ADD COLUMN is idempotent — swallow the "duplicate column" error.
+    try {
+      await this.#db.exec(`ALTER TABLE cfp_jobs ADD COLUMN cache_key_strategy TEXT`);
+    } catch {
+      // Column already exists; fine.
+    }
   }
 
   async enqueue(job: PersistedJob): Promise<void> {
@@ -47,8 +55,8 @@ export class D1JobStore implements JobStore {
           `INSERT INTO cfp_jobs (
             id, tenant_id, fn_hash, fn_source, args, context, meta,
             created_at, deadline_ms, retry_max, retry_count, retry_base_ms, retry_backoff,
-            status, idempotency_key
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+            status, idempotency_key, cache_key_strategy
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
         )
         .bind(
           job.id,
@@ -65,6 +73,7 @@ export class D1JobStore implements JobStore {
           job.retry.baseMs,
           job.retry.backoff,
           job.idempotencyKey ?? null,
+          job.cacheKeyStrategy ?? null,
         )
         .run();
     } catch (err) {
@@ -198,9 +207,7 @@ export class D1JobStore implements JobStore {
     return r?.status ?? null;
   }
 
-  async result(
-    jobId: string,
-  ): Promise<{
+  async result(jobId: string): Promise<{
     status: JobStatus;
     value?: unknown;
     error?: { name: string; message: string; stack?: string };
@@ -305,6 +312,7 @@ interface D1Row {
   result_expires_ms: number | null;
   error: string | null;
   idempotency_key: string | null;
+  cache_key_strategy?: string | null;
 }
 
 function rowToJob(row: D1Row): PersistedJob {
@@ -331,5 +339,8 @@ function rowToJob(row: D1Row): PersistedJob {
     resultExpiresMs: row.result_expires_ms ?? undefined,
     error: row.error ? JSON.parse(row.error) : undefined,
     idempotencyKey: row.idempotency_key ?? undefined,
+    cacheKeyStrategy: row.cache_key_strategy
+      ? (row.cache_key_strategy as 'stable' | 'fresh' | 'auto')
+      : undefined,
   };
 }

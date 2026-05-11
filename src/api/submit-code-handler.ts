@@ -17,7 +17,7 @@ import type { SubmitOptions } from './options';
  *   2. **Capability escalation via env.** Only bindings on
  *      `policy.allowBindings` reach the dynamic worker's `env`. Default
  *      `allowBindings = []` — submitted code sees no user bindings unless
- *      explicitly enumerated. See `restrictPoolBindings`.
+ *      explicitly enumerated. See `Pool.restrictTo` in pool.ts.
  *   3. **Fan-out amplification.** Submissions go through a single
  *      `pool.submit` (size=1). To prevent submitted code from spinning
  *      up ITS OWN pool from inside the loaded isolate, library-internal
@@ -63,7 +63,8 @@ export type SubmitCodePolicy<B> =
       maxFnSourceBytes?: number;
     };
 
-const PUBLIC_WARN = '[cloudflare-parallel] submitCodeHandler is running with policy:"public" — anyone can submit code. Use auth in production.';
+const PUBLIC_WARN =
+  '[cloudflare-parallel] submitCodeHandler is running with policy:"public" — anyone can submit code. Use auth in production.';
 let publicWarned = false;
 
 const DEFAULT_MAX_BYTES = 64 * 1024;
@@ -178,17 +179,15 @@ export function submitCodeHandler<B extends Record<string, unknown>>(
     }
 
     if (typeof parsed.fn !== 'string' || parsed.fn.length > maxFnSrc) {
-      return jsonError(
-        new Error(`fn must be a string ≤ ${maxFnSrc} bytes`),
-        400,
-        true,
-      );
+      return jsonError(new Error(`fn must be a string ≤ ${maxFnSrc} bytes`), 400, true);
     }
 
-    // Capability gate: rebuild the pool with only the allow-listed bindings
-    // visible. Default `allowBindings = []` means submitted code sees NO
-    // user bindings unless the policy explicitly enumerates them.
-    const restrictedPool = restrictPoolBindings(opts.pool, policy.allowBindings ?? []);
+    // Capability gate: rebuild the pool with only the allow-listed
+    // bindings visible. Default `allowBindings = []` means submitted
+    // code sees NO user bindings unless the policy explicitly
+    // enumerates them. `Pool.restrictTo` re-uses the same coordinator;
+    // only the bindings filter is rebuilt.
+    const restrictedPool = opts.pool.restrictTo(policy.allowBindings ?? []);
 
     try {
       // The submitted source is shipped to the loader directly — the
@@ -197,11 +196,7 @@ export function submitCodeHandler<B extends Record<string, unknown>>(
       // platform-sanctioned path for dynamic code; the loaded isolate
       // runs in its own V8 context with `globalOutbound: null` and no
       // user bindings unless `policy.allowBindings` opts in.
-      const value = await restrictedPool.submitSource(
-        parsed.fn,
-        parsed.args ?? [],
-        parsed.options,
-      );
+      const value = await restrictedPool.submitSource(parsed.fn, parsed.args ?? [], parsed.options);
       return opts.format ? opts.format(value) : Response.json({ ok: true, value });
     } catch (err) {
       // For `policy.kind === 'public'`, scrub stack traces and `cause`
@@ -274,7 +269,12 @@ function jsonError(
   const body = sanitize
     ? {
         ok: false,
-        error: { name: wire.name, message: wire.message, code: wire.code, httpStatus: wire.httpStatus },
+        error: {
+          name: wire.name,
+          message: wire.message,
+          code: wire.code,
+          httpStatus: wire.httpStatus,
+        },
       }
     : { ok: false, error: wire };
   return Response.json(body, { status });
@@ -286,19 +286,4 @@ function statusOfError(err: unknown): number {
     if (typeof s === 'number' && s >= 100 && s < 600) return s;
   }
   return 500;
-}
-
-/**
- * Build a Pool restricted to a subset of bindings. The original Pool's
- * options are preserved; only the `bindings` field is filtered.
- */
-function restrictPoolBindings<B extends Record<string, unknown>>(
-  pool: Pool<B, Record<string, unknown>>,
-  allow: ReadonlyArray<string>,
-): Pool<B, Record<string, unknown>> {
-  // The Pool exposes a public `restrictTo` method that returns a new Pool
-  // with the bindings filter applied (see Pool.restrictTo in pool.ts). The
-  // implementation re-uses the same env+coordinator, just sanitizes the
-  // bindings going through.
-  return pool.restrictTo(allow);
 }

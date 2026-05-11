@@ -28,7 +28,7 @@ export {
   CfpWorkerDO,
   CfpSubCoord,
   CfpInProcessCoordinator,
-} from "cloudflare-parallel/durable-objects";
+} from 'cloudflare-parallel/durable-objects';
 
 interface Env {
   LOADER: WorkerLoader;
@@ -131,9 +131,29 @@ export default {
       let counter = 0;
       const isIdent = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
       const reserved = new Set([
-        'function', 'return', 'let', 'const', 'var', 'if', 'else', 'while', 'for',
-        'do', 'break', 'continue', 'switch', 'case', 'default', 'true', 'false', 'null',
-        'undefined', 'new', 'this', 'typeof', 'instanceof',
+        'function',
+        'return',
+        'let',
+        'const',
+        'var',
+        'if',
+        'else',
+        'while',
+        'for',
+        'do',
+        'break',
+        'continue',
+        'switch',
+        'case',
+        'default',
+        'true',
+        'false',
+        'null',
+        'undefined',
+        'new',
+        'this',
+        'typeof',
+        'instanceof',
       ]);
       const minified: string[] = [];
       for (const t of live) {

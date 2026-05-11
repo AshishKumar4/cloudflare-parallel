@@ -30,7 +30,15 @@ export interface SelectorOptions {
   treeThreshold?: number;
 }
 
-const DEFAULT_MAX_FAN_OUT = 32;
+/**
+ * Default cap on outbound RPCs per coordinator turn. Above this, the
+ * auto-selector promotes a fan-out from `hybrid` to `tree` so the
+ * tier-1 coordinator stays under the per-DO subrequest budget.
+ *
+ * Exported so internal dispatch code can reference one constant
+ * instead of duplicating the literal.
+ */
+export const DEFAULT_MAX_FAN_OUT = 32;
 const DEFAULT_BRANCHING_FACTOR = 8;
 
 /**
@@ -146,8 +154,7 @@ function buildTreePlan(
   // fan-out cap. Using `maxFanOut` (not the legacy `maxFanOut × 4`)
   // because each leaf hybrid now dispatches one job per leaf DO.
   const K =
-    forcedDepth ??
-    Math.max(1, Math.ceil(Math.log(size / Math.max(1, maxFanOut)) / Math.log(F)));
+    forcedDepth ?? Math.max(1, Math.ceil(Math.log(size / Math.max(1, maxFanOut)) / Math.log(F)));
 
   const childSizes = balancedFill(size, F);
   const usedChildren = childSizes.filter((s) => s > 0);

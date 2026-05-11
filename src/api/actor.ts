@@ -1,7 +1,7 @@
 import { BindingError, MissingBindingError } from '../errors/index';
 import { hashSource, serializeFunction } from '../loader/serialize';
-import type { UserFn } from './user-fn';
 import {
+  getStub,
   locationHintForColo,
   workerOptionsToWire,
   type LocationHint,
@@ -15,7 +15,7 @@ import type {
   DispatchEnvelope,
   RunOneResult,
 } from '../coordinator/protocol';
-import { wireToError } from './error-decode';
+import { leafErrorToTypedError } from './error-decode';
 import { splitSubmitOptions } from './loader-only-pool';
 
 interface ActorCoordinatorStub {
@@ -32,15 +32,10 @@ interface ActorCoordinatorStub {
   actorClose(): Promise<void>;
 }
 
-// Local minimal shape — same as in `pool.ts`. `@cloudflare/workers-types`
-// declares this in newer versions but we don't want to hard-pin to one.
-interface DurableObjectNamespaceGetDurableObjectOptions {
-  locationHint?: LocationHint;
-}
-
 /**
  * Public ActorHandle interface — implemented by both {@link ActorHandle}
- * (the production class) and the testing fake (`Parallel.testing.actorFake`).
+ * (the production class) and the in-process `actorFake` from
+ * `cloudflare-parallel/testing`.
  */
 export interface IActorHandle<
   State extends Record<string, unknown>,
@@ -100,23 +95,14 @@ export class ActorHandle<
   }
 
   #stub(): ActorCoordinatorStub {
-    const ns = this.#env.CfpCoordinator!;
     // Per-actor DO instance keyed on `actor:${id}`. `locationHint` is
     // best-effort and only honored on first access; subsequent
     // `idFromName` lookups are sticky to wherever the DO landed.
-    const id = ns.idFromName(`actor:${this.#opts.id}`);
-    const stub = this.#locationHint
-      ? (ns as DurableObjectNamespace & {
-          get(
-            id: DurableObjectId,
-            opts?: DurableObjectNamespaceGetDurableObjectOptions,
-          ): DurableObjectStub;
-        }).get(
-          id,
-          { locationHint: this.#locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions,
-        )
-      : ns.get(id);
-    return stub as unknown as ActorCoordinatorStub;
+    return getStub<ActorCoordinatorStub>(
+      this.#env.CfpCoordinator!,
+      `actor:${this.#opts.id}`,
+      this.#locationHint,
+    );
   }
 
   /**
@@ -147,7 +133,7 @@ export class ActorHandle<
       this.#initialized = true;
     }
     const { args, opts } = splitSubmitOptions(rest);
-    const fnSource = serializeFunctionAllowingState(fn);
+    const fnSource = serializeFunction(fn);
     const fnHash = hashSource(fnSource);
     const envelope = buildEnvelope({
       cancel: opts?.cancel,
@@ -184,7 +170,7 @@ export class ActorHandle<
         deadlineEpochMs: envelope.deadlineEpochMs || undefined,
       },
     );
-    if (!result.ok) throw wireToError(result.error);
+    if (!result.ok) throw leafErrorToTypedError(result.error);
     return result.value as Awaited<R>;
   }
 
@@ -206,13 +192,4 @@ export class ActorHandle<
   async evict(_opts?: { persist?: boolean }): Promise<void> {
     return;
   }
-}
-
-/**
- * Like `serializeFunction` but allows `(state, sql, ...args)` shape — the
- * actor codegen path receives state/sql as positional args, NOT via `this`.
- * The v0.2 `this`-rejection still applies at the user-fn boundary.
- */
-function serializeFunctionAllowingState(fn: UserFn): string {
-  return serializeFunction(fn);
 }

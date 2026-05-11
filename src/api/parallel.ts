@@ -3,7 +3,6 @@ import { LoaderOnlyPoolImpl, type LoaderOnlyPool } from './loader-only-pool';
 import { ActorHandle } from './actor';
 import { Scheduler } from './scheduler';
 import { VM, vm, type VMHandle } from './vm';
-import { poolFake, loaderOnlyFake, actorFake, schedulerFake, vmFake } from './testing';
 import type {
   ActorOptions,
   LoaderOnlyOptions,
@@ -21,7 +20,11 @@ import type {
  *   - `Parallel.actor(env, opts)`        → long-lived stateful actor
  *   - `Parallel.scheduler(env, opts)`    → heterogeneous job scheduler
  *   - `Parallel.vm(env, opts)`           → HTTP submit-code surface
- *   - `Parallel.testing.*`               → in-process fakes for unit tests
+ *
+ * Test fakes live behind the `cloudflare-parallel/testing` entrypoint
+ * (`import { poolFake, ... } from 'cloudflare-parallel/testing'`) so
+ * production bundles tree-shake them out. They are deliberately NOT
+ * reachable from the main `Parallel` namespace.
  *
  * `Parallel.VM` is the class form of `Parallel.vm`.
  */
@@ -104,20 +107,4 @@ export const Parallel = {
 
   /** Class form of {@link Parallel.vm} for `new Parallel.VM(...)` callers. */
   VM,
-
-  /**
-   * In-process fakes for unit tests. Same return types as production
-   * (canonical `IPool` / `IActorHandle` / `IScheduler`); structured-clone
-   * roundtrip on args catches non-cloneable values.
-   *
-   * Imported via `cloudflare-parallel/testing` (separate exports path
-   * so production bundles don't pull in fakes).
-   */
-  testing: {
-    poolFake,
-    loaderOnlyFake,
-    actorFake,
-    schedulerFake,
-    vmFake,
-  },
 } as const;

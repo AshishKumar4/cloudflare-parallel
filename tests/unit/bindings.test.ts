@@ -20,7 +20,9 @@ describe('pickBindings', () => {
   test('handles empty / non-object env', () => {
     expect(pickBindings({} as Record<string, unknown>, ['x' as never])).toEqual({});
     expect(pickBindings(null as unknown as Record<string, unknown>, ['x' as never])).toEqual({});
-    expect(pickBindings(undefined as unknown as Record<string, unknown>, ['x' as never])).toEqual({});
+    expect(pickBindings(undefined as unknown as Record<string, unknown>, ['x' as never])).toEqual(
+      {},
+    );
   });
 
   test('preserves type-level Pick', () => {

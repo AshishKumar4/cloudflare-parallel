@@ -1,6 +1,7 @@
 /**
  * Worker Loader API types (closed/open beta — not yet in @cloudflare/workers-types).
- * Mirrors the v0.2 shape; remove when @cloudflare/workers-types ships them.
+ * Local re-declaration of the Worker Loader runtime types; remove
+ * once `@cloudflare/workers-types` ships them as part of its public API.
  * https://developers.cloudflare.com/dynamic-workers/api-reference/
  */
 
@@ -104,5 +105,5 @@ export interface RpcEnvelope {
   traceId?: string;
   spanId?: string;
   /** Marker so dispatched fns know which mode they're running under. */
-  mode: 'pool-fn' | 'actor-class' | 'sub-coord';
+  mode: 'pool-fn' | 'actor-class';
 }

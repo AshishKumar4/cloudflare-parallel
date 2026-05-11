@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { emitObservabilityEvent } from '../../src/observability/index';
-import type {
-  AnalyticsEngineDataset,
-  ObservabilityOptions,
-} from '../../src/api/options';
+import type { AnalyticsEngineDataset, ObservabilityOptions } from '../../src/api/options';
 
 function makeAE(): {
   ds: AnalyticsEngineDataset;
@@ -41,11 +38,28 @@ describe('emitObservabilityEvent', () => {
     });
     emitObservabilityEvent(opts, {
       kind: 'taskEnd',
-      payload: { ts: 0, poolId: 'p', taskId: 't', topology: 'in-do', fnHash: 'h', wallMs: 1, retryCount: 0 },
+      payload: {
+        ts: 0,
+        poolId: 'p',
+        taskId: 't',
+        topology: 'in-do',
+        fnHash: 'h',
+        wallMs: 1,
+        retryCount: 0,
+      },
     });
     emitObservabilityEvent(opts, {
       kind: 'taskError',
-      payload: { ts: 0, poolId: 'p', taskId: 't', topology: 'in-do', fnHash: 'h', errorClass: 'E', message: 'm', retryCount: 0 },
+      payload: {
+        ts: 0,
+        poolId: 'p',
+        taskId: 't',
+        topology: 'in-do',
+        fnHash: 'h',
+        errorClass: 'E',
+        message: 'm',
+        retryCount: 0,
+      },
     });
     emitObservabilityEvent(opts, {
       kind: 'taskOrphan',
@@ -85,11 +99,28 @@ describe('emitObservabilityEvent', () => {
 
     emitObservabilityEvent(opts, {
       kind: 'taskEnd',
-      payload: { ts: 0, poolId: 'p', taskId: 't', topology: 'in-do', fnHash: 'h', wallMs: 1, retryCount: 0 },
+      payload: {
+        ts: 0,
+        poolId: 'p',
+        taskId: 't',
+        topology: 'in-do',
+        fnHash: 'h',
+        wallMs: 1,
+        retryCount: 0,
+      },
     });
     emitObservabilityEvent(opts, {
       kind: 'taskError',
-      payload: { ts: 0, poolId: 'p', taskId: 't', topology: 'in-do', fnHash: 'h', errorClass: 'E', message: 'm', retryCount: 0 },
+      payload: {
+        ts: 0,
+        poolId: 'p',
+        taskId: 't',
+        topology: 'in-do',
+        fnHash: 'h',
+        errorClass: 'E',
+        message: 'm',
+        retryCount: 0,
+      },
     });
     emitObservabilityEvent(opts, {
       kind: 'taskOrphan',
@@ -149,7 +180,15 @@ describe('emitObservabilityEvent', () => {
     expect(() =>
       emitObservabilityEvent(opts, {
         kind: 'taskEnd',
-        payload: { ts: 0, poolId: 'p', taskId: 't', topology: 'in-do', fnHash: 'h', wallMs: 1, retryCount: 0 },
+        payload: {
+          ts: 0,
+          poolId: 'p',
+          taskId: 't',
+          topology: 'in-do',
+          fnHash: 'h',
+          wallMs: 1,
+          retryCount: 0,
+        },
       }),
     ).not.toThrow();
   });

@@ -10,8 +10,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type {
-  ParallelError} from '../../src/errors/index';
+import type { ParallelError } from '../../src/errors/index';
 import {
   AggregateExecutionError,
   BackpressureError,

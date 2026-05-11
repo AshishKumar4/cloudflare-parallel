@@ -68,9 +68,7 @@ describe('buildCacheKey', () => {
     try {
       const keys = new Set<string>();
       for (let i = 0; i < 100; i++) {
-        keys.add(
-          buildCacheKey({ fnSource: 'fn', contextHash: '', strategy: 'stable' }),
-        );
+        keys.add(buildCacheKey({ fnSource: 'fn', contextHash: '', strategy: 'stable' }));
         now += 90_000; // 90s gap each iteration → would land in different `auto` buckets.
       }
       expect(keys.size).toBe(1);

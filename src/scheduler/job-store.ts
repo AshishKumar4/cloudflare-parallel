@@ -14,6 +14,13 @@ export interface PersistedJob {
   retry: RetryPolicy;
   retryCount: number;
   status: JobStatus;
+  /**
+   * Loader cache-key strategy for this job's isolate. Mirrors the
+   * `PoolOptions.cacheKeyStrategy` knob — `'stable'` reuses one
+   * isolate per (fnHash, slot); `'fresh'` forces a clean V8 heap per
+   * call; `'auto'` buckets by 60s windows. Defaults to `'stable'`.
+   */
+  cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
   leaseOwner?: string;
   leaseExpiresMs?: number;
   result?: unknown;
@@ -79,9 +86,7 @@ export interface JobStore {
     error: { name: string; message: string; stack?: string },
   ): Promise<boolean>;
   status(jobId: string): Promise<JobStatus | null>;
-  result(
-    jobId: string,
-  ): Promise<{
+  result(jobId: string): Promise<{
     status: JobStatus;
     value?: unknown;
     error?: { name: string; message: string; stack?: string };

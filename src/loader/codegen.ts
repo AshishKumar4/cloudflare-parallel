@@ -4,7 +4,7 @@ import { assertValidContextKey, canonicalizeContext } from './serialize';
 /** Default compatibility date — picks up `enable_ctx_exports` and `rpc_params_dup_stubs`. */
 export const DEFAULT_COMPAT_DATE = '2026-01-20';
 
-export type CodegenMode = 'pool-fn' | 'actor-class' | 'sub-coord';
+export type CodegenMode = 'pool-fn' | 'actor-class';
 
 export interface GenerateSourceOptions {
   mode: CodegenMode;
@@ -18,7 +18,7 @@ export interface GenerateSourceOptions {
   sealGlobals: boolean;
 }
 
-export interface WorkerCodeOptions {
+export interface InternalWorkerCodeOptions {
   compatibilityDate?: string;
   compatibilityFlags?: string[];
   env?: Record<string, unknown>;
@@ -210,23 +210,10 @@ export function generateWorkerSource(fnSource: string | null, opts: GenerateSour
       '  }',
       '}',
     );
-    // emitDispose is now a no-op; placeholder reserved for v0.4 live-cancel.
+    // `emitDispose` was historically a hook for live-cancel disposal —
+    // suppress the unused-symbol warning until the v0.4 cancel path
+    // surfaces a concrete use for it.
     void emitDispose;
-  } else if (opts.mode === 'sub-coord') {
-    // Sub-coordinator: receives a TopologyPlan slice and dispatches. The
-    // actual fan-out logic lives in the library's coordinator code which
-    // is bundled by the user when they declare the sub-coord DO class.
-    lines.push(
-      "// Sub-coordinator code is provided by cloudflare-parallel's",
-      '// coordinator/sub-coordinator.ts module — the loader cache key',
-      "// for this mode points at the library's own bundled class, not",
-      '// user code. This generated stub only re-exports.',
-      'export default class extends WorkerEntrypoint {',
-      '  async dispatch(plan, args) {',
-      '    throw new Error("sub-coord codegen is a placeholder; runtime loads the library bundle");',
-      '  }',
-      '}',
-    );
   }
 
   return lines.join('\n');
@@ -235,7 +222,7 @@ export function generateWorkerSource(fnSource: string | null, opts: GenerateSour
 export interface BuildWorkerCodeOptions {
   fnSource: string | null;
   source: GenerateSourceOptions;
-  worker?: WorkerCodeOptions;
+  worker?: InternalWorkerCodeOptions;
 }
 
 export function buildWorkerCode(opts: BuildWorkerCodeOptions): WorkerCode {

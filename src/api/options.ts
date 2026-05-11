@@ -3,6 +3,7 @@ import type { SubmitCodePolicy } from './submit-code-handler';
 import type { CancelToken } from './cancel';
 import type { Topology } from '../topology/selector';
 import type { CacheKeyStrategy } from '../loader/cache-key';
+import type { JobStore } from '../scheduler/job-store';
 import type { LocationHint } from '../coordinator/internal';
 import type {
   CoordinatorRunRequest,
@@ -54,20 +55,42 @@ export interface PoolEnv {
 
 // ---- Worker code options (compat date / globalOutbound / limits / tails) ----
 
+/**
+ * Options forwarded to every loaded isolate the library spins up.
+ * Affect cold-start behavior (`compatibilityDate`, `compatibilityFlags`),
+ * sandboxing (`globalOutbound`), and resource caps (`limits`). All
+ * factories accept this shape via `PoolOptions.workerOptions`.
+ */
 export interface WorkerCodeOptions {
+  /** Workers runtime compatibility date. Defaults to the library's bundled date (`2026-01-20`). */
   compatibilityDate?: string;
+  /** Additional compatibility flags for the loaded isolate. */
   compatibilityFlags?: string[];
-  /** `null` = sandboxed (default), `undefined` = inherit, ServiceStub = redirect. */
+  /** `null` = sandboxed (default), `undefined` = inherit, `ServiceStub` = redirect. */
   globalOutbound?: ServiceStub | null;
+  /** Per-isolate runtime caps (cpuMs, subrequests, etc). */
   limits?: WorkerCodeLimits;
 }
 
 // ---- observability ----------------------------------------------------
 
+/**
+ * Minimal shape of a Workers Analytics Engine binding. The library
+ * does not type-import `@cloudflare/workers-types` directly so this
+ * mirror suffices.
+ */
 export interface AnalyticsEngineDataset {
   writeDataPoint(point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void;
 }
 
+/**
+ * Observability config — direct hooks for in-process metrics + tail
+ * workers for cross-Worker fan-out logging + Analytics Engine for
+ * sampled aggregate metrics.
+ *
+ * Hooks fire synchronously and must not mutate the runtime; errors
+ * inside hooks are caught and dropped so they cannot break submits.
+ */
 export interface ObservabilityOptions {
   /** Direct callback hooks (synchronous; runtime mutations forbidden). */
   hooks?: {
@@ -147,21 +170,47 @@ export interface SchedulerEvent {
 
 // ---- pool / actor / scheduler / vm options ----------------------------
 
+/**
+ * Options for `Parallel.pool(env, opts)`. Every field is optional;
+ * defaults match the validated production profile (Mandelbrot bench:
+ * `cacheKeyStrategy: 'stable'`, `autoWarm: true`, `maxFanOut: 32`,
+ * `branchingFactor: 8`).
+ *
+ * Two type parameters:
+ *  - `B` — shape of user bindings forwarded into the loaded isolate's
+ *    `env`. Defaults to a wide `Record<string, unknown>`; users
+ *    typically supply their `Env` interface.
+ *  - `C` — shape of module-scope context embedded as `const k = JSON`
+ *    statements in the loaded source. JSON-canonicalizable only.
+ */
 export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unknown>> {
+  /** User bindings forwarded into the loaded isolate's `env`. */
   bindings?: B;
+  /** Module-scope constants embedded into the loaded source. JSON-only. */
   context?: C;
+  /** Wall-clock cap per submit. Default 30s. */
   timeout?: number;
+  /** Number of retries on transient errors (Backpressure, Disconnected). Default 0. */
   retries?: number;
+  /** Initial retry backoff in ms; jittered ±25%. Default 100. */
   retryDelay?: number;
+  /** `null` (default) = sandboxed, `undefined` = inherit caller's outbound, `ServiceStub` = proxy. */
   globalOutbound?: ServiceStub | null;
+  /** Per-isolate `cpuMs` / `subRequests` caps. */
   limits?: WorkerCodeLimits;
   /** Topology pinning. Loader-only is via `Parallel.loaderOnly()`, not here. */
   topology?: Topology;
+  /** Per-coordinator RPC fan-out cap (default 32). Above this, auto-selector promotes to tree. */
   maxFanOut?: number;
+  /** Tree branching factor F (range 4..16). Default 8. */
   branchingFactor?: number;
+  /** Override hybrid→tree boundary; defaults to `maxFanOut`. */
   treeThreshold?: number;
+  /** `'stable'` (default) per `(fn, slot)`, `'fresh'` per call, `'auto'` 60s buckets. */
   cacheKeyStrategy?: CacheKeyStrategy;
+  /** Observability hooks + tail-Worker + Analytics Engine. */
   observability?: ObservabilityOptions;
+  /** Forwarded to every loaded isolate. See {@link WorkerCodeOptions}. */
   workerOptions?: WorkerCodeOptions;
   /** Coordinator DO id. Default = a stable per-Worker id. */
   coordinatorId?: string;
@@ -219,33 +268,64 @@ export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unk
   autoWarm?: boolean;
 }
 
+/**
+ * Options for `Parallel.loaderOnly(env, opts)`. Strictly narrower than
+ * `PoolOptions` — no Coordinator DO is involved, so topology /
+ * autoWarm / inProcess / locationHint fields are not supported.
+ * Concurrent loaders are capped at 3 per Worker fetch handler by the
+ * runtime; use {@link PoolOptions} for higher fan-out.
+ */
 export interface LoaderOnlyOptions<B = Record<string, unknown>, C = Record<string, unknown>> {
+  /** User bindings forwarded into the loaded isolate's `env`. */
   bindings?: B;
+  /** Module-scope context. JSON-canonicalizable only. */
   context?: C;
+  /** Wall-clock cap per submit. */
   timeout?: number;
+  /** Retries on transient errors. */
   retries?: number;
+  /** Initial retry backoff in ms. */
   retryDelay?: number;
+  /** `null` = sandboxed (default), `undefined` = inherit. */
   globalOutbound?: ServiceStub | null;
+  /** Per-isolate runtime caps. */
   limits?: WorkerCodeLimits;
+  /** Loader cache-key strategy. */
   cacheKeyStrategy?: CacheKeyStrategy;
+  /** Worker code options (compatibilityDate, flags, limits). */
   workerOptions?: WorkerCodeOptions;
 }
 
+/**
+ * Options for a long-lived stateful actor. Extends
+ * `WorkerSharedOptions` rather than `PoolOptions` because actors are
+ * single-DO / single-job — topology knobs (`topology`, `maxFanOut`,
+ * `branchingFactor`, `treeThreshold`) and the auto-warm / inProcess
+ * pool-only fields don't apply.
+ */
 export interface ActorOptions<
   State = Record<string, unknown>,
   B = Record<string, unknown>,
   C = Record<string, unknown>,
-> extends PoolOptions<B, C> {
+> extends WorkerSharedOptions<B, C> {
+  /** Stable actor instance key. */
   id: string;
+  /** Initial state if the actor is materialized for the first time. */
   initialState?: State;
+  /** Reserved for future use — hibernation is not wired in the current release. */
   hibernation?: { idleMs?: number; persist?: boolean };
 }
 
+/** Retry backoff curve. */
 export type RetryBackoff = 'exponential' | 'linear' | 'constant';
 
+/** Retry policy for `Job.retry` and `PoolOptions.retries`-driven submits. */
 export interface RetryPolicy {
+  /** Maximum retry attempts. */
   max: number;
+  /** Backoff curve — `'exponential'` doubles per attempt, `'linear'` adds, `'constant'` flat. */
   backoff: RetryBackoff;
+  /** Initial backoff in ms; multiplied per the chosen curve. */
   baseMs: number;
 }
 
@@ -254,10 +334,7 @@ export interface RetryPolicy {
  * Extracted from `PoolOptions` so `SchedulerOptions` can compose them
  * without inheriting fan-out tuning that doesn't apply to the scheduler.
  */
-export interface WorkerSharedOptions<
-  B = Record<string, unknown>,
-  C = Record<string, unknown>,
-> {
+export interface WorkerSharedOptions<B = Record<string, unknown>, C = Record<string, unknown>> {
   bindings?: B;
   context?: C;
   timeout?: number;
@@ -292,15 +369,19 @@ export interface SchedulerOptions<
   id: string;
   /**
    * JobStore backend. Default `'do-storage'` (canonical, transactional).
-   * `'queues'` and `'d1'` are opt-in adapters; passing a `JobStore`
-   * implementation directly is supported (typed `unknown` here for the
-   * wire shape).
+   * `'queues'` and `'d1'` are opt-in adapter names; pass a `JobStore`
+   * implementation directly for custom backends.
    */
-  store?: 'do-storage' | 'queues' | 'd1' | unknown;
+  store?: 'do-storage' | 'queues' | 'd1' | JobStore;
+  /** Per-tenant fairness key + capacity for round-robin dispatch. */
   fairness?: { keyFrom: (job: Job<unknown[], unknown>) => string; capacityPerKey: number };
+  /** Retry policy applied to jobs that don't carry their own. */
   retry?: RetryPolicy;
+  /** Default per-job deadline when `Job.deadline` is omitted. */
   deadline?: { defaultMs: number };
+  /** How long `done` results linger before sweep. After this, `result()` throws `ResultExpiredError`. */
   resultRetention?: { ttlMs: number };
+  /** Backstop alarm cadence (retry + result-TTL sweep + expired-lease reclaim). */
   alarmCadence?: { activeMs: number; idleMs: number };
   /** Max concurrent jobs in dispatch (default 32). */
   inFlightLimit?: number;
@@ -311,10 +392,11 @@ export interface SchedulerOptions<
 }
 
 /**
- * VM options. `VMOptions<B>` extends `PoolOptions<B>` directly — the v0.2
- * nested `pool: PoolOptions<B>` shape was awkward. The legacy
- * `pool:` field is still honored for backward-compat; new code should
- * pass pool options at the top level.
+ * VM options. `VMOptions<B>` extends `PoolOptions<B>` directly so all
+ * pool tuning knobs (topology, autoWarm, cacheKeyStrategy, etc.) are
+ * accepted at the top level. A handful of fields are kept as
+ * `@deprecated` aliases for the earlier nested `pool: PoolOptions<B>`
+ * shape — slated for removal in the next major.
  */
 export interface VMOptions<B = Record<string, unknown>> extends PoolOptions<B> {
   /**
@@ -349,87 +431,154 @@ export interface VMOptions<B = Record<string, unknown>> extends PoolOptions<B> {
 
 // ---- submit / job shapes ---------------------------------------------
 
+/**
+ * Failure-handling strategy for fan-out operations. Choose based on
+ * how aggressively you want sibling tasks to keep running after one
+ * fails:
+ *  - `'throw'` (default) — wait for all siblings, throw `AggregateExecutionError`.
+ *  - `'throw-fast'` — first error wins; abort newer dispatches.
+ *  - `'null'` — replace failures with `null` in the result array.
+ *  - `'skip'` — drop failures (output length shrinks).
+ *  - `'settled'` — return `SettledResult<R>[]` (Promise.allSettled shape).
+ */
 export type OnErrorStrategy = 'throw' | 'throw-fast' | 'null' | 'skip' | 'settled';
 
+/**
+ * Per-submission overrides. Trail any submit-shape (`pool.submit`,
+ * `pool.map`, `pool.scatter`, `Scheduler.enqueue`'s job options) — the
+ * library detects the bag by key shape.
+ */
 export interface SubmitOptions {
+  /** Wall-clock cap for this call. */
   timeout?: number;
+  /** Retries on transient errors for this call. */
   retries?: number;
+  /** Initial retry backoff in ms. */
   retryDelay?: number;
+  /** Per-call module-scope context overlaid on `PoolOptions.context`. */
   context?: Record<string, unknown>;
+  /** Cooperative cancel token. The library plumbs it into `env.signal`. */
   cancel?: CancelToken;
   /** Absolute ms-since-epoch deadline. Mutually exclusive with `deadlineMs`. */
   deadline?: number;
   /** Relative-from-now ms deadline (convenience). Mutually exclusive with `deadline`. */
   deadlineMs?: number;
-  /** Override stable cache key for this submission. */
+  /** Force a fresh V8 heap for this submission. */
   freshIsolate?: boolean;
+  /** Free-form metadata stored alongside the job; surfaced in observability events. */
   meta?: Record<string, string>;
 }
 
+/** Options for `pool.map(fn, items, opts)`. */
 export interface MapOptions extends SubmitOptions {
+  /** Cap on concurrent dispatches; defaults to `items.length`. */
   concurrency?: number;
+  /** Failure mode. See {@link OnErrorStrategy}. */
   onError?: OnErrorStrategy;
 }
 
+/** Options for the `pool.pmap(fn)` returned mapper. */
 export interface PmapOptions {
+  /** Number of partitions; the items array is sliced N ways. */
   chunks?: number;
 }
 
+/** Options for `pool.scatter(fn, items, chunks, opts)`. */
 export interface ScatterOptions extends SubmitOptions {
+  /** Failure mode. See {@link OnErrorStrategy}. */
   onError?: OnErrorStrategy;
 }
 
+/** Options for `pool.mapStream(fn, items, opts)`. */
 export interface StreamOptions extends SubmitOptions {
+  /** Cap on concurrent dispatches; defaults to `items.length`. */
   concurrency?: number;
 }
 
+/** One yielded result from `pool.mapStream`. */
 export interface StreamResult<T> {
+  /** Original index of the corresponding item. */
   index: number;
+  /** User-fn return value for that item. */
   value: T;
 }
 
+/** A job submission to {@link Scheduler.enqueue}. */
 export interface Job<A extends unknown[], R> {
+  /** The user function. Must be pure / closure-free (per {@link Pure}). */
   fn: (...args: A) => R | Promise<R>;
+  /** Positional arguments for `fn`. */
   args: A;
+  /** Optional tenant key for fair-queueing. */
   tenantId?: string;
   /** Relative-from-submission ms. */
   deadlineMs?: number;
   /** Absolute ms-since-epoch. Mutually exclusive with `deadlineMs`. */
   deadline?: number;
+  /** Per-job retry policy override. */
   retry?: RetryPolicy;
+  /** Dedup key — repeat submissions are no-ops once a matching job exists. */
   idempotencyKey?: string;
+  /** Free-form metadata persisted with the job. */
   meta?: Record<string, string>;
 }
 
-/** Job lifecycle status. `leased` = claimed by a worker but not yet ack'd; user-facing `JobHandle.status()` collapses `leased` to `running`. */
+/**
+ * Job lifecycle status.
+ *
+ * `leased` = claimed by a worker but not yet ack'd; user-facing
+ * `JobHandle.status()` collapses `leased` to `running`.
+ */
 export type JobStatus = 'queued' | 'leased' | 'running' | 'done' | 'failed' | 'cancelled';
 
+/** Handle to an in-flight Scheduler job. */
 export interface JobHandle<R> {
+  /** Stable job id (also the idempotency key when one was supplied). */
   readonly id: string;
+  /** Resolve with the job result; reject with the typed library error if it failed. */
   result(): Promise<R>;
+  /** Snapshot the current status. */
   status(): Promise<JobStatus>;
+  /** Cancel the job. No-op if already terminal. */
   cancel(reason?: string): Promise<void>;
 }
 
 // ---- stats ------------------------------------------------------------
 
+/** Snapshot of pool state returned by `Pool.stats()`. */
 export interface PoolStats {
+  /** Submits currently in flight. */
   inFlight: number;
+  /** Submits queued (in-process backpressure). */
   queued: number;
+  /** Total submits completed successfully since pool construction. */
   completed: number;
+  /** Total submits that threw a typed error. */
   failed: number;
+  /** Total submits cancelled by token / deadline / parent-cancel. */
   cancelled: number;
+  /** Last topology decision made by the auto-selector. */
   topology: Exclude<Topology, 'auto'> | 'loader-only';
+  /** When that decision was made (epoch ms). */
   topologyDecisionAt: number;
+  /** Best-effort estimate of warm loaded isolates currently cached. */
   warmIsolatesEstimate: number;
+  /** Distinct fn-shape hashes seen so far today. */
   uniqueFnShapesToday: number;
+  /** Loader LRU evictions in the last rolling 60s window. */
   lruEvictionLast60sCount: number;
+  /** Depth of the last topology decision (1 = hybrid, K = tree). */
   treeDepth: number;
+  /** Fan-out widths per coordinator tier (root → leaf). */
   fanOutPerLevel: number[];
 }
 
+/** Snapshot of scheduler state returned by `Scheduler.stats()`. */
 export interface SchedulerStats extends PoolStats {
+  /** Per-tenant `{ queued, running }` counts. */
   byTenant: Record<string, { queued: number; running: number }>;
+  /** Age of the oldest still-queued job (ms). */
   oldestQueuedAgeMs: number;
+  /** Configured result retention TTL. */
   resultRetentionTtlMs: number;
 }

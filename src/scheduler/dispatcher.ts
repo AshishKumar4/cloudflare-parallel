@@ -1,4 +1,6 @@
 import type { JobStore, PersistedJob } from './job-store';
+import { errorToRecord } from '../coordinator/protocol';
+import { QueueFullError } from '../errors/index';
 
 /**
  * Pure reactive dispatcher core. Holds the ready-set / running-set /
@@ -116,11 +118,7 @@ export class Dispatcher {
   async enqueue(job: PersistedJob): Promise<void> {
     const queueDepth = this.totalReady();
     if (queueDepth >= this.#config.maxQueueDepth) {
-      const err = new Error(
-        `Dispatcher queue full (depth=${queueDepth}, max=${this.#config.maxQueueDepth})`,
-      );
-      err.name = 'QueueFullError';
-      throw err;
+      throw new QueueFullError(queueDepth, this.#config.maxQueueDepth);
     }
     await this.#store.enqueue(job);
     this.#enqueueReady(job);
@@ -180,7 +178,11 @@ export class Dispatcher {
   /** Returns a snapshot of ready jobs per tenant — for tests. */
   inspectReady(): Map<string, string[]> {
     const out = new Map<string, string[]>();
-    for (const [tid, q] of this.#ready) out.set(tid, q.map((j) => j.id));
+    for (const [tid, q] of this.#ready)
+      out.set(
+        tid,
+        q.map((j) => j.id),
+      );
     return out;
   }
 
@@ -249,7 +251,7 @@ export class Dispatcher {
       const value = await this.#runJob(job, this.#ownerId);
       await this.#store.ack(job.id, this.#ownerId, value, Date.now() + this.#config.resultTtlMs);
     } catch (rawErr) {
-      const err = toErrorRecord(rawErr);
+      const err = errorToRecord(rawErr);
       const next = await this.#store.fail(job.id, this.#ownerId, err);
       if (next === 'queued') {
         // Re-queued for retry. Compute backoff and schedule a setTimeout
@@ -258,10 +260,7 @@ export class Dispatcher {
         // picked up on the next alarm tick. Also fire the
         // backstop alarm hook for cross-DO-restart durability.
         const base = job.retry?.baseMs ?? RETRY_BACKOFF_BASE_MS;
-        const factor = Math.pow(
-          job.retry?.backoff === 'exponential' ? 2 : 1,
-          job.retryCount,
-        );
+        const factor = Math.pow(job.retry?.backoff === 'exponential' ? 2 : 1, job.retryCount);
         const delayMs = Math.min(base * factor, RETRY_MAX_DELAY_MS);
         this.#hooks.onScheduleRetry?.(delayMs);
         // Construct an updated job snapshot — retryCount has been
@@ -333,11 +332,4 @@ export class Dispatcher {
     const idx = this.#tenantOrder.indexOf(tid);
     if (idx >= 0) this.#tenantOrder.splice(idx, 1);
   }
-}
-
-function toErrorRecord(e: unknown): { name: string; message: string; stack?: string } {
-  if (e instanceof Error) {
-    return { name: e.name, message: e.message, stack: e.stack };
-  }
-  return { name: 'UnknownError', message: String(e) };
 }

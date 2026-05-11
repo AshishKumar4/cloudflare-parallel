@@ -1,12 +1,11 @@
 import type { RpcEnvelope, WorkerCode, WorkerLoader } from '../types';
-import { buildWorkerCode, type WorkerCodeOptions } from './codegen';
+import { buildWorkerCode, type InternalWorkerCodeOptions } from './codegen';
 import { buildCacheKey, type CacheKeyStrategy } from './cache-key';
 import { isolateSemaphore, type CallSiteKind } from './loader-budget';
 import { sanitizeBindings } from './sandbox';
 import { canonicalizeContext, hashSource } from './serialize';
 import { validateReturn, rejectIfRpcStub } from './return-validator';
 import { marshalError } from '../transport/error-marshal';
-
 
 export interface LoaderRunnerOptions {
   loader: WorkerLoader;
@@ -22,7 +21,7 @@ export interface LoaderRunnerOptions {
   /** Cache-key strategy. */
   cacheKeyStrategy: CacheKeyStrategy;
   /** Default WorkerCode options (compatibilityDate, globalOutbound, limits, tails). */
-  workerOptions?: WorkerCodeOptions;
+  workerOptions?: InternalWorkerCodeOptions;
   /** Optional bindings allow-list. Default: pass everything user supplied (minus `Cfp*`). */
   allowList?: ReadonlyArray<string>;
 }
@@ -160,9 +159,4 @@ export class LoaderRunner {
       }
     });
   }
-}
-
-/** Factory for a runner with sensible defaults. */
-export function makeLoaderRunner(opts: LoaderRunnerOptions): LoaderRunner {
-  return new LoaderRunner(opts);
 }

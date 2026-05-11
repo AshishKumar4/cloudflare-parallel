@@ -28,7 +28,12 @@ function constantTimeEqual(a: string, b: string): boolean {
   const subtle = (globalThis as { crypto?: { subtle?: { timingSafeEqual?: unknown } } }).crypto
     ?.subtle;
   const tse = subtle as
-    | { timingSafeEqual?: (a: ArrayBuffer | ArrayBufferView, b: ArrayBuffer | ArrayBufferView) => boolean }
+    | {
+        timingSafeEqual?: (
+          a: ArrayBuffer | ArrayBufferView,
+          b: ArrayBuffer | ArrayBufferView,
+        ) => boolean;
+      }
     | undefined;
   if (typeof tse?.timingSafeEqual === 'function') {
     const ab = encoder.encode(a);

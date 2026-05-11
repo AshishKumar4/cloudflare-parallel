@@ -16,14 +16,22 @@ import {
 } from '../errors/index';
 
 /**
- * Reconstruct a typed library error from the leaf-RPC wire shape carried in
- * `RunOneResult.error`. Distinct from `errors.wireToError(WireError)` (which
- * is the full typed-error round-trip including `code`, `httpStatus`,
- * `extra`, `cause`); this is the small per-leaf failure envelope
- * (`{name, message, stack, originalName}`) used by the coordinator <->
- * leaf-DO RPC. Maps by class name.
+ * Reconstruct a typed library error from the leaf-RPC wire shape
+ * carried in `RunOneResult.error`. Distinct from `errors.wireToError`
+ * (which is the full typed-error round-trip including `code`,
+ * `httpStatus`, `extra`, `cause`); this is the small per-leaf failure
+ * envelope (`{name, message, stack, originalName}`) used by the
+ * coordinator ↔ leaf-DO RPC. Maps by class name.
+ *
+ * **Lossy reconstruction.** The leaf-RPC envelope drops structured
+ * fields (`DeadlineExceededError.deadlineEpochMs`, `BillingLimitError.kind`,
+ * `ReturnTooLargeError.bytes`, etc), so this helper rebuilds them
+ * with sentinel values (`0` / `''` / `'cpuMs'`). Callers needing the
+ * full structured payload should consume `WireError` via
+ * `errors.wireToError`. For most user code the name + message are
+ * enough for `instanceof` narrowing and presentation.
  */
-export function wireToError(wire: {
+export function leafErrorToTypedError(wire: {
   name: string;
   message: string;
   stack?: string;

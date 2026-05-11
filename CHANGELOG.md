@@ -6,6 +6,102 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Chore (quality audit + cleanup pass)
+
+A deep audit (see `/workspace/quality-audit-findings.md`) drove a
+cleanup pass with zero perf regressions:
+
+- **P0 fixes**:
+  - `scheduler-do.ts#runJob` now honors the per-job
+    `cacheKeyStrategy` — previously hard-coded to `'stable'`. Schema
+    bumped to v2 with idempotent `ALTER TABLE ADD COLUMN` migrations
+    on both DO-storage and D1 stores.
+  - `pool.map(opts: { onError: 'throw-fast' })` no longer iterates a
+    never-populated `childTokens` array. Behavior unchanged
+    (`Promise.all` semantics for in-flight in-process tasks; pass a
+    `CancelToken` to abort in-flight RPCs).
+  - Test fakes (`poolFake`, `actorFake`, `schedulerFake`,
+    `loaderOnlyFake`, `vmFake`) no longer leak into the production
+    bundle. `Parallel.testing.*` is **removed** from the
+    `Parallel` namespace — use `import { poolFake, ... } from
+    'cloudflare-parallel/testing'`. `dist/index.js` is now genuinely
+    fakes-free.
+- **Topology cleanup**:
+  - Dropped `LoaderOnlyPlan` from the `TopologyPlan` union (the
+    selector never returned it; the coordinator threw on it).
+  - Dropped `'sub-coord'` from `CodegenMode` (the codegen arm emitted
+    a placeholder that threw on call; never reached).
+  - Renamed the codegen-internal `WorkerCodeOptions` →
+    `InternalWorkerCodeOptions`. The user-facing one keeps its name.
+  - Raised `maxFanOut` cap from 64 → 256 in the selector. Defaults
+    unchanged.
+- **De-duplication**:
+  - The four `#stub()` hand-rolls in `pool.ts`, `scheduler.ts`,
+    `actor.ts`, `submit-code-handler.ts` all route through
+    `coordinator/internal.ts:getStub` now. Three redundant
+    `DurableObjectNamespaceGetDurableObjectOptions` redeclarations
+    deleted.
+  - Extracted shared `mergeContext` (`api/context-merge.ts`),
+    shared `splitSubmitOptions` / `isSubmitOptionsBag` /
+    `SUBMIT_OPTION_KEYS` (`api/submit-options.ts`), shared
+    `errorToRecord` (`coordinator/protocol.ts`) helpers.
+  - Replaced `sub-coordinator.ts#balancedFillForTree` with
+    `balancedFill` from `topology/plan.ts` (no cross-module cycle
+    actually exists; the local copy was redundant).
+  - Hoisted `MAX_TRANSIENT_RETRIES = 2` and `transientBackoff()`
+    helper in `coordinator.ts`. Tree-dispatch retry and leaf-batch
+    retry both use them now.
+- **Dead code removed**:
+  - `src/config/` (doctor.ts + wrangler.ts) — the CLI it referenced
+    was never built. All `cloudflare-parallel doctor` mentions purged
+    from error messages and TSDoc.
+  - `makeLoaderRunner`, `serializeFunctionAllowingState`,
+    `envelopeRemainingMs`, `checkDeadline`, `idFromName`,
+    `restrictPoolBindings` — one-line wrappers / never-called helpers.
+  - `Scheduler.attachQueue` — runtime no-op placeholder for the
+    (non-existent) doctor CLI.
+  - `Pool.#cancelOff` variable — `CancelToken.onCancel` is one-shot
+    so the manual unsubscribe path was dead. Replaced with a comment.
+  - `'sub-coord'` codegen arm.
+  - Stale `bench-results.json` (one-shot e2e summary; the live bench
+    writes `bench-results-live.json`).
+- **Error hierarchy**:
+  - `QueueFullError extends BackpressureError` — scheduler now throws
+    a typed error with structured `depth` / `maxDepth` fields. Added
+    `CFP_QUEUE_FULL` to the `ErrorCode` union. Replaces the hand-rolled
+    `new Error()` + `.name = 'QueueFullError'` shim.
+- **API consistency**:
+  - `ActorOptions` now extends `WorkerSharedOptions` instead of
+    `PoolOptions`. Topology / fan-out / autoWarm / inProcess fields
+    don't bleed onto the actor surface anymore (they were no-ops on
+    actors, which are single-DO single-job).
+  - `SchedulerOptions.store` typed as `'do-storage' | 'queues' | 'd1' |
+    JobStore` instead of `... | unknown`.
+  - Renamed the leaf-RPC error decoder from
+    `api/error-decode.ts:wireToError` → `leafErrorToTypedError` to
+    end the name collision with `errors/index.ts:wireToError` (full
+    `WireError` reconstruction). The two are deliberately distinct.
+- **TSDoc**:
+  - Added TSDoc to every user-facing option interface in
+    `api/options.ts`: `PoolOptions`, `LoaderOnlyOptions`,
+    `ActorOptions`, `SchedulerOptions`, `VMOptions`, `SubmitOptions`,
+    `MapOptions`, `PmapOptions`, `ScatterOptions`, `StreamOptions`,
+    `StreamResult`, `Job`, `JobHandle`, `JobStatus`, `RetryPolicy`,
+    `RetryBackoff`, `OnErrorStrategy`, `PoolStats`, `SchedulerStats`,
+    `ObservabilityOptions`, `AnalyticsEngineDataset`,
+    `WorkerCodeOptions`.
+- **Repo hygiene**:
+  - `package.json` gained `homepage`, `bugs`, `author`,
+    `publishConfig: { access: 'public', registry: ... }`. Repo URL
+    follows `git+https://...git` convention.
+  - CI bundle-size budget bumped 250 → 300 KB packed / 1 → 1.5 MB
+    unpacked. Source maps continue to ship — they're 50 % of the
+    tarball and worth the debug ergonomics.
+  - `bench-results.json` gitignored (the per-run e2e output file);
+    `bench-results-live.json` remains the committed reference.
+  - Cleaned up v0.2-era TSDoc callouts that were doc-debt residue
+    from prior majors.
+
 ### Performance (dispatch-overhead audit fixes)
 
 Forensic audit of the dispatch path (see

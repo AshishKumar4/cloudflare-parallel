@@ -6,12 +6,7 @@
  * NOT used in production — production uses {@link DoStorageJobStore}.
  */
 import type { JobStatus } from '../../src/api/options';
-import type {
-  ClaimRequest,
-  JobEvent,
-  JobStore,
-  PersistedJob,
-} from '../../src/scheduler/job-store';
+import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../../src/scheduler/job-store';
 
 export class MemoryJobStore implements JobStore {
   readonly jobs = new Map<string, PersistedJob>();
@@ -159,9 +154,7 @@ export class MemoryJobStore implements JobStore {
 
   async listActiveByTenant(tenantId: string): Promise<PersistedJob[]> {
     return [...this.jobs.values()]
-      .filter(
-        (j) => j.tenantId === tenantId && (j.status === 'queued' || j.status === 'leased'),
-      )
+      .filter((j) => j.tenantId === tenantId && (j.status === 'queued' || j.status === 'leased'))
       .map((j) => ({ ...j }));
   }
 

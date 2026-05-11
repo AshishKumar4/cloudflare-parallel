@@ -116,9 +116,7 @@ describe('selectTopology', () => {
   });
 
   it("explicit topology: 'hybrid' with size > maxFanOut throws", () => {
-    expect(() => selectTopology(33, { topology: 'hybrid', maxFanOut: 32 })).toThrow(
-      TopologyError,
-    );
+    expect(() => selectTopology(33, { topology: 'hybrid', maxFanOut: 32 })).toThrow(TopologyError);
   });
 
   it('rejects invalid branchingFactor', () => {

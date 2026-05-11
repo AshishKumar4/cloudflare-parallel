@@ -23,8 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC = (rel: string): string =>
-  readFileSync(resolve(__dirname, '../../src', rel), 'utf-8');
+const SRC = (rel: string): string => readFileSync(resolve(__dirname, '../../src', rel), 'utf-8');
 
 describe('V4 allowUnconfirmed application', () => {
   it('actor checkpoint writes pass allowUnconfirmed: true', () => {
@@ -74,25 +73,14 @@ describe('V4 allowUnconfirmed application', () => {
     for (let i = 0; i < lines.length; i++) {
       // Pick out the actual call sites, not comments that happen to
       // mention `allowUnconfirmed: true`.
-      if (
-        lines[i].includes('allowUnconfirmed: true') &&
-        lines[i].includes('storage.put')
-      ) {
+      if (lines[i].includes('allowUnconfirmed: true') && lines[i].includes('storage.put')) {
         flaggedLines.push(i);
       }
     }
     expect(flaggedLines.length).toBeGreaterThanOrEqual(3);
-    const safetyVocab = [
-      'best-effort',
-      'recoverable',
-      'crash',
-      'wall-time',
-      '46–80%',
-    ];
+    const safetyVocab = ['best-effort', 'recoverable', 'crash', 'wall-time', '46–80%'];
     for (const lineIdx of flaggedLines) {
-      const window = lines
-        .slice(Math.max(0, lineIdx - 20), lineIdx)
-        .join('\n');
+      const window = lines.slice(Math.max(0, lineIdx - 20), lineIdx).join('\n');
       const hasComment = safetyVocab.some((v) => window.includes(v));
       expect(hasComment).toBe(true);
     }

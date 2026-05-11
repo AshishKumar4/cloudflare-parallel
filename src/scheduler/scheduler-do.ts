@@ -5,11 +5,7 @@ import { DoStorageJobStore } from './stores/do-storage';
 import type { JobStore, PersistedJob } from './job-store';
 import { type DispatchEnvelope, type RunOneRequest } from '../coordinator/protocol';
 import type { JobStatus, RetryPolicy } from '../api/options';
-import {
-  Dispatcher,
-  DEFAULT_DISPATCHER_CONFIG,
-  type DispatcherConfig,
-} from './dispatcher';
+import { Dispatcher, DEFAULT_DISPATCHER_CONFIG, type DispatcherConfig } from './dispatcher';
 
 const ALARM_SWEEP_MS = 5_000;
 const IDLE_ALARM_MS = 60_000;
@@ -18,7 +14,7 @@ const IDLE_ALARM_MS = 60_000;
  * `CfpSchedulerDO` — DO shim wiring the pure {@link Dispatcher} core to
  * SQLite storage + a `LoaderRunner`-backed job runner.
  *
- * Architecture (replaces the v0.2 alarm-batched dispatch):
+ * Architecture (reactive — single-flight dispatch loop, no alarm-batching):
  *
  * - Storage (DO SQLite, via {@link DoStorageJobStore}) is canonical.
  * - {@link Dispatcher} owns the in-memory ready/running sets, fair-queueing,
@@ -82,6 +78,7 @@ export class CfpSchedulerDO extends DurableObject<SchedulerDOEnv> {
       retryCount: 0,
       status: 'queued',
       idempotencyKey: req.idempotencyKey,
+      cacheKeyStrategy: req.cacheKeyStrategy,
     };
     await this.#getDispatcher().enqueue(job);
     return { id: req.id, queueDepth: this.#getDispatcher().totalReady() };
@@ -193,8 +190,7 @@ export class CfpSchedulerDO extends DurableObject<SchedulerDOEnv> {
     //    Otherwise rebuild to pick up any retry-backoff'd jobs that the
     //    in-DO setTimeout missed (cross-restart durability).
     const cfg = dispatcher.config();
-    const saturated =
-      dispatcher.totalReady() + dispatcher.runningCount() >= cfg.inFlightLimit;
+    const saturated = dispatcher.totalReady() + dispatcher.runningCount() >= cfg.inFlightLimit;
     if (!saturated) {
       await dispatcher.rebuildFromStorage();
     }
@@ -263,7 +259,9 @@ export class CfpSchedulerDO extends DurableObject<SchedulerDOEnv> {
     const runner = new LoaderRunner({
       loader: this.env.LOADER,
       callSite: 'do-method',
-      cacheKeyStrategy: 'stable',
+      // Honor the per-job strategy enqueued by the caller. Defaults to
+      // `'stable'` — same as `PoolOptions.cacheKeyStrategy` default.
+      cacheKeyStrategy: job.cacheKeyStrategy ?? 'stable',
     });
     const envelope: DispatchEnvelope = {
       deadlineEpochMs: job.deadlineEpochMs,

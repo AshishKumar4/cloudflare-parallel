@@ -64,9 +64,7 @@ function stripBundlerShims(src: string): string {
   out = out.replace(
     /__publicField\(\s*([^,]+?)\s*,\s*("[^"]*"|'[^']*'|[A-Za-z_$][A-Za-z0-9_$]*)\s*,\s*([\s\S]+?)\s*\)\s*;?/g,
     (_m, target: string, key: string, value: string) => {
-      const accessor = key.startsWith('"') || key.startsWith("'")
-        ? `[${key}]`
-        : `.${key}`;
+      const accessor = key.startsWith('"') || key.startsWith("'") ? `[${key}]` : `.${key}`;
       return `${target}${accessor} = ${value};`;
     },
   );

@@ -29,15 +29,18 @@ jobs:
       - name: Build
         run: bun run build
       - name: Bundle size budget
-        # Fail if packed size exceeds 250 KB or unpacked exceeds 1 MB.
-        # Bump the budget deliberately if a v0.x addition warrants it.
+        # Fail if packed size exceeds 300 KB or unpacked exceeds 1.5 MB.
+        # Sourcemaps ship — they help users debug their loaded isolates
+        # — so the budget is sized to fit `dist/` plus `README.md`,
+        # `CHANGELOG.md`, `DESIGN.md`, `docs/`, and `LICENSE`. Bump
+        # deliberately if an addition warrants it.
         run: |
           OUT=$(npm pack --dry-run --json | tee /tmp/pack.json)
           PACKED=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pack.json','utf8'))[0].size)")
           UNPACKED=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/pack.json','utf8'))[0].unpackedSize)")
           echo "packed=$PACKED unpacked=$UNPACKED"
-          if [ "$PACKED" -gt 256000 ]; then echo "FAIL: packed > 250 KB"; exit 1; fi
-          if [ "$UNPACKED" -gt 1048576 ]; then echo "FAIL: unpacked > 1 MB"; exit 1; fi
+          if [ "$PACKED" -gt 307200 ]; then echo "FAIL: packed > 300 KB"; exit 1; fi
+          if [ "$UNPACKED" -gt 1572864 ]; then echo "FAIL: unpacked > 1.5 MB"; exit 1; fi
       - name: Integration (skipped without Wrangler creds)
         env:
           SKIP_INTEGRATION: '1'

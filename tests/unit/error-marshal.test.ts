@@ -64,15 +64,11 @@ describe('marshalError', () => {
   });
 
   it('maps "cannot be cloned" → SerializationError (E6)', () => {
-    expect(marshalError(new Error('Argument cannot be cloned'))).toBeInstanceOf(
-      SerializationError,
-    );
+    expect(marshalError(new Error('Argument cannot be cloned'))).toBeInstanceOf(SerializationError);
   });
 
   it('maps "not serializable" → SerializationError (E6)', () => {
-    expect(marshalError(new Error('value is not serializable'))).toBeInstanceOf(
-      SerializationError,
-    );
+    expect(marshalError(new Error('value is not serializable'))).toBeInstanceOf(SerializationError);
   });
 
   it('maps "too many requests" → BackpressureError (E5)', () => {

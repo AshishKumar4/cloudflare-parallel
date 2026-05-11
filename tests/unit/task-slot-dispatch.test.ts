@@ -18,10 +18,7 @@
 import { describe, expect, it } from 'bun:test';
 import { Pool } from '../../src/api/pool';
 import { LoaderOnlyPoolImpl } from '../../src/api/loader-only-pool';
-import type {
-  CoordinatorRunRequest,
-  RunOneResult,
-} from '../../src/coordinator/protocol';
+import type { CoordinatorRunRequest, RunOneResult } from '../../src/coordinator/protocol';
 import type { PoolEnv } from '../../src/api/options';
 import type { WorkerLoader } from '../../src/types';
 import { extractFnShapeHash } from '../../src/loader/cache-key';
@@ -88,9 +85,15 @@ describe('taskSlot dispatch — loader-only pool', () => {
     };
     const pool = new LoaderOnlyPoolImpl(env, {});
     await pool.map((x: number) => x + 1, [1, 2, 3, 4]);
-    const firstFour = record.slice(0, 4).map((r) => r.id).sort();
+    const firstFour = record
+      .slice(0, 4)
+      .map((r) => r.id)
+      .sort();
     await pool.map((x: number) => x + 1, [5, 6, 7, 8]);
-    const secondFour = record.slice(4, 8).map((r) => r.id).sort();
+    const secondFour = record
+      .slice(4, 8)
+      .map((r) => r.id)
+      .sort();
     expect(firstFour).toEqual(secondFour); // same keys, warm reuse
   });
 

@@ -1,7 +1,7 @@
 /**
  * cloudflare-parallel error hierarchy.
  *
- * Backwards-compatible from v0.2: every new error extends a v0.2 ancestor
+ * Backwards-compatible across the entire error hierarchy: every new error extends a stable ancestor
  * so existing `instanceof` checks keep working. See DESIGN §9.1.
  *
  * Each error has:
@@ -33,6 +33,7 @@ export type ErrorCode =
   | 'CFP_CANCELLED'
   | 'CFP_DEADLINE_EXCEEDED'
   | 'CFP_BACKPRESSURE'
+  | 'CFP_QUEUE_FULL'
   | 'CFP_RESULT_EXPIRED'
   | 'CFP_CONFLICT'
   | 'CFP_TOPOLOGY'
@@ -223,7 +224,10 @@ export class ExecutionError extends ParallelError {
 export class DisconnectedError extends ExecutionError {
   override readonly code: ErrorCode = 'CFP_DISCONNECTED';
   override readonly httpStatus = 502; // bad gateway — upstream worker died
-  constructor(message = 'Dynamic worker disconnected (eviction or abortIsolate)', opts?: { cause?: unknown }) {
+  constructor(
+    message = 'Dynamic worker disconnected (eviction or abortIsolate)',
+    opts?: { cause?: unknown },
+  ) {
     super(message, opts);
     this.name = 'DisconnectedError';
   }
@@ -256,7 +260,7 @@ export class BillingLimitError extends ExecutionError {
   }
 }
 
-// ---- timeout / retry / binding (preserved from v0.2) -------------------
+// ---- timeout / retry / binding -----------------------------------------
 
 /**
  * Fires when a task exceeds its `timeout` budget (wall-clock from
@@ -308,8 +312,8 @@ export class RetryExhaustedError extends ParallelError {
  * (e.g. attempts to forward a library-internal `Cfp*` DO).
  *
  * **User action.** Add the binding to wrangler.toml; for missing
- * bindings the {@link MissingBindingError} subclass tells you which one.
- * Run `npx cloudflare-parallel doctor` to scaffold the right config.
+ * bindings the {@link MissingBindingError} subclass tells you which
+ * one. The README's "Wiring up" section is the canonical reference.
  */
 export class BindingError extends ParallelError {
   override readonly code: ErrorCode = 'CFP_BINDING';
@@ -321,8 +325,9 @@ export class BindingError extends ParallelError {
 }
 
 /**
- * Compat shim throws this when v0.2 → v0.3 migration is incomplete (the
- * `CfpCoordinator` DO binding is missing). See MIGRATION §7.
+ * Thrown when a binding required by the library is absent from `env`
+ * — most commonly because a user wired up `Parallel.pool` without
+ * registering `CfpCoordinator` in wrangler.toml.
  */
 export class MissingBindingError extends BindingError {
   override readonly code: ErrorCode = 'CFP_MISSING_BINDING';
@@ -330,7 +335,7 @@ export class MissingBindingError extends BindingError {
   constructor(bindingName: string, options?: { cause?: unknown }) {
     super(
       `Required binding '${bindingName}' is missing. ` +
-        `Run 'cloudflare-parallel doctor' to scaffold wrangler.toml.`,
+        `Add it to your wrangler.toml — see the README "Wiring up" section.`,
       options,
     );
     this.name = 'MissingBindingError';
@@ -401,7 +406,7 @@ export class DeadlineExceededError extends ParallelError {
  */
 export class BackpressureError extends ParallelError {
   override readonly code: ErrorCode = 'CFP_BACKPRESSURE';
-  override readonly httpStatus = 503;
+  override readonly httpStatus: number = 503;
   readonly retryAfterMs: number;
   constructor(message = 'Runtime backpressure', retryAfterMs = 100, options?: { cause?: unknown }) {
     super(message, options);
@@ -410,6 +415,27 @@ export class BackpressureError extends ParallelError {
   }
   protected override extraJsonFields(): Partial<WireError> {
     return { extra: { retryAfterMs: this.retryAfterMs } };
+  }
+}
+
+/**
+ * Scheduler-specific saturation: `Dispatcher` rejected `enqueue` because
+ * `maxQueueDepth` was reached. Extends `BackpressureError` so callers
+ * that already handle backpressure with retry logic catch both.
+ */
+export class QueueFullError extends BackpressureError {
+  override readonly code: ErrorCode = 'CFP_QUEUE_FULL';
+  override readonly httpStatus: number = 429;
+  readonly depth: number;
+  readonly maxDepth: number;
+  constructor(depth: number, maxDepth: number, options?: { cause?: unknown }) {
+    super(`Dispatcher queue full (depth=${depth}, max=${maxDepth})`, 0, options);
+    this.name = 'QueueFullError';
+    this.depth = depth;
+    this.maxDepth = maxDepth;
+  }
+  protected override extraJsonFields(): Partial<WireError> {
+    return { extra: { depth: this.depth, maxDepth: this.maxDepth } };
   }
 }
 
@@ -478,10 +504,7 @@ export class AggregateExecutionError extends ParallelError {
   override readonly httpStatus = 500;
   readonly errors: ReadonlyMap<number, ParallelError>;
   readonly partialResults: ReadonlyMap<number, unknown>;
-  constructor(
-    errors: Map<number, ParallelError>,
-    partialResults: Map<number, unknown>,
-  ) {
+  constructor(errors: Map<number, ParallelError>, partialResults: Map<number, unknown>) {
     const first = errors.values().next().value;
     super(`${errors.size} task(s) failed: ${first?.message ?? '(unknown)'}`);
     this.name = 'AggregateExecutionError';
@@ -528,7 +551,9 @@ export function wireToError(wire: WireError): ParallelError {
     case 'CFP_OUT_OF_MEMORY':
       return new OutOfMemoryError(wire.message, { cause });
     case 'CFP_BILLING_LIMIT':
-      return new BillingLimitError((extra.kind as BillingLimitKind) ?? 'cpuMs', wire.message, { cause });
+      return new BillingLimitError((extra.kind as BillingLimitKind) ?? 'cpuMs', wire.message, {
+        cause,
+      });
     case 'CFP_RETURN_TOO_LARGE':
       return new ReturnTooLargeError((extra.bytes as number) ?? 0, { cause });
     case 'CFP_DEADLINE_TOO_SHORT':
@@ -558,8 +583,10 @@ export function wireToError(wire: WireError): ParallelError {
     case 'CFP_AGGREGATE_EXECUTION': {
       const errMap = new Map<number, ParallelError>();
       const partMap = new Map<number, unknown>();
-      const ee = (extra.errorEntries as Array<{ index: number; error: WireError }> | undefined) ?? [];
-      const pe = (extra.partialResultEntries as Array<{ index: number; value: unknown }> | undefined) ?? [];
+      const ee =
+        (extra.errorEntries as Array<{ index: number; error: WireError }> | undefined) ?? [];
+      const pe =
+        (extra.partialResultEntries as Array<{ index: number; value: unknown }> | undefined) ?? [];
       for (const { index, error } of ee) errMap.set(index, wireToError(error));
       for (const { index, value } of pe) partMap.set(index, value);
       return new AggregateExecutionError(errMap, partMap);
@@ -612,7 +639,10 @@ export function errorToWire(err: unknown): WireError {
 export function isParallelError(err: unknown): err is ParallelError {
   if (err instanceof ParallelError) return true;
   return Boolean(
-    err && typeof err === 'object' && typeof (err as { code?: unknown }).code === 'string' && /^CFP_/.test((err as { code: string }).code),
+    err &&
+    typeof err === 'object' &&
+    typeof (err as { code?: unknown }).code === 'string' &&
+    /^CFP_/.test((err as { code: string }).code),
   );
 }
 
@@ -644,9 +674,7 @@ export function isExecutionError(err: unknown): err is ExecutionError {
 }
 
 /** True when a fan-out fails with `onError: 'throw' | 'throw-fast'`. */
-export function isAggregateExecutionError(
-  err: unknown,
-): err is AggregateExecutionError {
+export function isAggregateExecutionError(err: unknown): err is AggregateExecutionError {
   return (
     err instanceof AggregateExecutionError ||
     (isParallelError(err) && (err as ParallelError).code === 'CFP_AGGREGATE_EXECUTION')

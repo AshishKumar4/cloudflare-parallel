@@ -101,11 +101,9 @@ export class CancelToken implements AsyncDisposable {
       if (this.#controller.signal.aborted) {
         reject(this.#cancelledError());
       } else {
-        this.#controller.signal.addEventListener(
-          'abort',
-          () => reject(this.#cancelledError()),
-          { once: true },
-        );
+        this.#controller.signal.addEventListener('abort', () => reject(this.#cancelledError()), {
+          once: true,
+        });
       }
     });
   }
@@ -137,11 +135,9 @@ export class CancelToken implements AsyncDisposable {
       this.#children.add(c);
       // If the child gets cancelled directly, drop it from our set so we
       // don't keep a stale reference.
-      c.#controller.signal.addEventListener(
-        'abort',
-        () => this.#children.delete(c),
-        { once: true },
-      );
+      c.#controller.signal.addEventListener('abort', () => this.#children.delete(c), {
+        once: true,
+      });
     }
     return c;
   }

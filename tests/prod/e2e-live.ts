@@ -106,9 +106,7 @@ async function runTests(): Promise<void> {
   );
   // Topology coverage at every regime: in-do (≤4), hybrid (5..256), tree (>256).
   // n=512 forces the auto-selector into the tree topology.
-  const sizes = REMOTE
-    ? [4, 8, 16, 32, 64, 128, 256, 512]
-    : [4, 8, 16, 32, 64, 128];
+  const sizes = REMOTE ? [4, 8, 16, 32, 64, 128, 256, 512] : [4, 8, 16, 32, 64, 128];
   for (const size of sizes) {
     const items = Array.from({ length: size }, (_, i) => i);
     await timed(`pool/map size=${size}`, () => callJson('/pool/map', { items }));
@@ -166,11 +164,7 @@ async function runTests(): Promise<void> {
     return { status: r.status };
   });
   await timed('vm POST (with auth) → 200', () =>
-    callJson(
-      '/vm',
-      { fn: '(a, b) => a * b', args: [6, 7] },
-      { authorization: `Bearer ${TOKEN}` },
-    ),
+    callJson('/vm', { fn: '(a, b) => a * b', args: [6, 7] }, { authorization: `Bearer ${TOKEN}` }),
   );
 
   // Loader-only
@@ -178,9 +172,7 @@ async function runTests(): Promise<void> {
 
   // Errors
   await timed('errors/timeout (TimeoutError)', () => callJson('/errors/timeout'));
-  await timed('errors/aggregate (AggregateExecutionError)', () =>
-    callJson('/errors/aggregate'),
-  );
+  await timed('errors/aggregate (AggregateExecutionError)', () => callJson('/errors/aggregate'));
 }
 
 // ----- Bootstrap & teardown ----------------------------------------------

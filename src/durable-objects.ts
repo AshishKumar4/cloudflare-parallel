@@ -26,8 +26,8 @@
  * Coordinator DO so each task lands in its own leaf DO process.
  *
  * The matching `wrangler.toml` bindings are documented in the project
- * README; run `npx cloudflare-parallel doctor` to scaffold them in an
- * existing Worker.
+ * README under "Wiring up". Use the README's snippet directly — the
+ * library does not ship a CLI scaffolder.
  */
 
 export {

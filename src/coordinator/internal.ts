@@ -1,9 +1,9 @@
 import type { ServiceStub } from '../types';
-import type { WorkerCodeOptions } from '../loader/codegen';
+import type { InternalWorkerCodeOptions } from '../loader/codegen';
 import type { RunOneRequest } from './protocol';
 
 /**
- * Re-hydrate wire-shape workerOptions into the codegen.WorkerCodeOptions.
+ * Re-hydrate wire-shape workerOptions into the codegen.InternalWorkerCodeOptions.
  *
  * @param wire - the structured-clone-safe wire shape from the caller.
  * @param env - the receiving DO's env. Used to resolve `tailBindingName`
@@ -14,9 +14,9 @@ import type { RunOneRequest } from './protocol';
 export function wireToWorkerOptions(
   wire: RunOneRequest['workerOptions'],
   env?: Record<string, unknown>,
-): WorkerCodeOptions | undefined {
+): InternalWorkerCodeOptions | undefined {
   if (!wire) return undefined;
-  const out: WorkerCodeOptions = {
+  const out: InternalWorkerCodeOptions = {
     compatibilityDate: wire.compatibilityDate,
     compatibilityFlags: wire.compatibilityFlags,
     limits: wire.limits,
@@ -39,7 +39,7 @@ export function wireToWorkerOptions(
 
 /** Marshal user-supplied workerOptions to the structured-clone-safe wire shape. */
 export function workerOptionsToWire(
-  opts: (WorkerCodeOptions & { tailBindingName?: string }) | undefined,
+  opts: (InternalWorkerCodeOptions & { tailBindingName?: string }) | undefined,
 ): RunOneRequest['workerOptions'] | undefined {
   if (!opts) return undefined;
   let outbound: 'inherit' | 'sandboxed' | undefined;
@@ -66,16 +66,7 @@ export function workerOptionsToWire(
  *
  * Reference: https://developers.cloudflare.com/durable-objects/reference/data-location/
  */
-export type LocationHint =
-  | 'wnam'
-  | 'enam'
-  | 'sam'
-  | 'weur'
-  | 'eeur'
-  | 'apac'
-  | 'oc'
-  | 'afr'
-  | 'me';
+export type LocationHint = 'wnam' | 'enam' | 'sam' | 'weur' | 'eeur' | 'apac' | 'oc' | 'afr' | 'me';
 
 /**
  * Coarse-grained mapping from a Cloudflare colo code (the three-letter IATA
@@ -89,32 +80,93 @@ export type LocationHint =
  */
 const COLO_TO_REGION: Record<string, LocationHint> = {
   // North America (west)
-  SFO: 'wnam', SJC: 'wnam', LAX: 'wnam', SEA: 'wnam', PDX: 'wnam',
-  PHX: 'wnam', DEN: 'wnam', SLC: 'wnam', LAS: 'wnam', YVR: 'wnam',
+  SFO: 'wnam',
+  SJC: 'wnam',
+  LAX: 'wnam',
+  SEA: 'wnam',
+  PDX: 'wnam',
+  PHX: 'wnam',
+  DEN: 'wnam',
+  SLC: 'wnam',
+  LAS: 'wnam',
+  YVR: 'wnam',
   // North America (east)
-  IAD: 'enam', EWR: 'enam', JFK: 'enam', BOS: 'enam', ATL: 'enam',
-  ORD: 'enam', DFW: 'enam', MIA: 'enam', YYZ: 'enam', YUL: 'enam',
-  MCI: 'enam', MSP: 'enam',
+  IAD: 'enam',
+  EWR: 'enam',
+  JFK: 'enam',
+  BOS: 'enam',
+  ATL: 'enam',
+  ORD: 'enam',
+  DFW: 'enam',
+  MIA: 'enam',
+  YYZ: 'enam',
+  YUL: 'enam',
+  MCI: 'enam',
+  MSP: 'enam',
   // South America
-  GRU: 'sam', GIG: 'sam', EZE: 'sam', SCL: 'sam', BOG: 'sam', LIM: 'sam',
+  GRU: 'sam',
+  GIG: 'sam',
+  EZE: 'sam',
+  SCL: 'sam',
+  BOG: 'sam',
+  LIM: 'sam',
   // Western Europe
-  LHR: 'weur', LON: 'weur', AMS: 'weur', CDG: 'weur', FRA: 'weur',
-  MAD: 'weur', MXP: 'weur', DUB: 'weur', BRU: 'weur', ZRH: 'weur',
-  STO: 'weur', ARN: 'weur', CPH: 'weur', OSL: 'weur', HEL: 'weur',
-  VIE: 'weur', LIS: 'weur',
+  LHR: 'weur',
+  LON: 'weur',
+  AMS: 'weur',
+  CDG: 'weur',
+  FRA: 'weur',
+  MAD: 'weur',
+  MXP: 'weur',
+  DUB: 'weur',
+  BRU: 'weur',
+  ZRH: 'weur',
+  STO: 'weur',
+  ARN: 'weur',
+  CPH: 'weur',
+  OSL: 'weur',
+  HEL: 'weur',
+  VIE: 'weur',
+  LIS: 'weur',
   // Eastern Europe
-  WAW: 'eeur', PRG: 'eeur', BUD: 'eeur', SOF: 'eeur', OTP: 'eeur',
-  KBP: 'eeur', IST: 'eeur',
+  WAW: 'eeur',
+  PRG: 'eeur',
+  BUD: 'eeur',
+  SOF: 'eeur',
+  OTP: 'eeur',
+  KBP: 'eeur',
+  IST: 'eeur',
   // Asia Pacific
-  NRT: 'apac', KIX: 'apac', HND: 'apac', ICN: 'apac', HKG: 'apac',
-  SIN: 'apac', BKK: 'apac', KUL: 'apac', TPE: 'apac', BOM: 'apac',
-  DEL: 'apac', MAA: 'apac', BLR: 'apac', CGK: 'apac', MNL: 'apac',
+  NRT: 'apac',
+  KIX: 'apac',
+  HND: 'apac',
+  ICN: 'apac',
+  HKG: 'apac',
+  SIN: 'apac',
+  BKK: 'apac',
+  KUL: 'apac',
+  TPE: 'apac',
+  BOM: 'apac',
+  DEL: 'apac',
+  MAA: 'apac',
+  BLR: 'apac',
+  CGK: 'apac',
+  MNL: 'apac',
   // Oceania
-  SYD: 'oc', MEL: 'oc', PER: 'oc', AKL: 'oc',
+  SYD: 'oc',
+  MEL: 'oc',
+  PER: 'oc',
+  AKL: 'oc',
   // Africa
-  JNB: 'afr', CPT: 'afr', LOS: 'afr', NBO: 'afr',
+  JNB: 'afr',
+  CPT: 'afr',
+  LOS: 'afr',
+  NBO: 'afr',
   // Middle East
-  DXB: 'me', DOH: 'me', RUH: 'me', TLV: 'me',
+  DXB: 'me',
+  DOH: 'me',
+  RUH: 'me',
+  TLV: 'me',
 };
 
 /**
@@ -125,11 +177,6 @@ const COLO_TO_REGION: Record<string, LocationHint> = {
 export function locationHintForColo(colo: string | undefined): LocationHint | undefined {
   if (!colo) return undefined;
   return COLO_TO_REGION[colo.toUpperCase()];
-}
-
-/** Pick a deterministic DO id from a stable string. */
-export function idFromName(ns: DurableObjectNamespace, name: string): DurableObjectId {
-  return ns.idFromName(name);
 }
 
 /**
@@ -149,11 +196,18 @@ export function getStub<T>(
   // depending on @cloudflare/workers-types version — the runtime accepts it
   // unconditionally. Cast the options through `unknown` so we work against
   // older type packages without losing the runtime hint.
-  const opts = locationHint ? ({ locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions) : undefined;
+  const opts = locationHint
+    ? ({ locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions)
+    : undefined;
   const stub = opts
-    ? (ns as DurableObjectNamespace & {
-        get(id: DurableObjectId, opts?: DurableObjectNamespaceGetDurableObjectOptions): DurableObjectStub;
-      }).get(id, opts)
+    ? (
+        ns as DurableObjectNamespace & {
+          get(
+            id: DurableObjectId,
+            opts?: DurableObjectNamespaceGetDurableObjectOptions,
+          ): DurableObjectStub;
+        }
+      ).get(id, opts)
     : ns.get(id);
   return stub as DurableObjectStub & T;
 }
@@ -163,6 +217,3 @@ export function getStub<T>(
 interface DurableObjectNamespaceGetDurableObjectOptions {
   locationHint?: LocationHint;
 }
-
-// Re-export ServiceStub so consumers of this internal module needn't import it from types.
-export type { ServiceStub };

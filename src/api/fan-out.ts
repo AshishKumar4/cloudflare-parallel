@@ -1,5 +1,4 @@
 import { AggregateExecutionError, CancelledError, ParallelError } from '../errors/index';
-import type { CancelToken } from './cancel';
 import type { OnErrorStrategy } from './options';
 
 export type FanOutMode = 'map' | 'scatter';
@@ -10,8 +9,6 @@ export interface FanOutOptions<T, R> {
   onError: OnErrorStrategy;
   mode: FanOutMode;
   run: (item: T, idx: number) => Promise<R>;
-  /** Parent cancel token; used to derive per-item children for `'throw-fast'`. */
-  cancel?: CancelToken;
 }
 
 interface SettledOk<R> {
@@ -35,16 +32,18 @@ export async function runFanOut<T, R>(opts: FanOutOptions<T, R>): Promise<R[]> {
   const { items, run, onError } = opts;
   if (items.length === 0) return [];
 
-  // For 'throw-fast', derive child tokens per item so we can cancel siblings
-  // synchronously when the first error arrives. The parent ref is unused
-  // today (children are minted-and-tripped, not minted-from-parent), but
-  // staged so a future linker can wire propagation properly.
-  const childTokens: CancelToken[] = [];
-
   const settled: Settled<R>[] = new Array(items.length);
   let cursor = 0;
   let aborted = false;
 
+  // `throw-fast` semantics: when the first error lands, set `aborted = true`
+  // so newer items still in the worker-pool queue are short-circuited to a
+  // `CancelledError`. Items that are ALREADY in flight (their `run()` call
+  // entered the dispatcher) continue to run to completion — their results
+  // are discarded. This matches `Promise.all` cancellation semantics for
+  // non-cancellable promises. To cancel in-flight RPCs as well, callers
+  // pass a `CancelToken` via `pool.map(opts.cancel)` which the dispatcher
+  // wires into each leaf's `env.signal`.
   const runOne = async (idx: number): Promise<void> => {
     if (aborted) {
       settled[idx] = {
@@ -59,10 +58,7 @@ export async function runFanOut<T, R>(opts: FanOutOptions<T, R>): Promise<R[]> {
     } catch (err) {
       const e = asParallel(err);
       settled[idx] = { ok: false, error: e };
-      if (onError === 'throw-fast') {
-        aborted = true;
-        for (const ct of childTokens) ct.cancel('throw-fast: sibling failed');
-      }
+      if (onError === 'throw-fast') aborted = true;
     }
   };
 

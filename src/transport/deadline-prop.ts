@@ -1,4 +1,4 @@
-import { DeadlineExceededError, DeadlineTooShortError, SerializationError } from '../errors/index';
+import { DeadlineTooShortError, SerializationError } from '../errors/index';
 import type { RpcEnvelope } from '../types';
 import type { CancelToken } from '../api/cancel';
 
@@ -55,19 +55,7 @@ export function buildEnvelope(opts: {
  * Minimum effective deadline budget given tree depth (per-hop ~50ms typical
  * skew × 2 for budget). At K=4 with F=8 the 5-hop chain wants ~500ms+ floor.
  */
-export function computeMinBudget(treeDepth: number): number {
+function computeMinBudget(treeDepth: number): number {
   if (treeDepth <= 1) return MIN_DEADLINE_BUDGET_MS;
   return Math.max(MIN_DEADLINE_BUDGET_MS, 200 * treeDepth);
-}
-
-export function envelopeRemainingMs(envelope: RpcEnvelope): number | null {
-  if (!envelope.deadlineEpochMs) return null;
-  return envelope.deadlineEpochMs - Date.now();
-}
-
-export function checkDeadline(envelope: RpcEnvelope): void {
-  if (!envelope.deadlineEpochMs) return;
-  if (Date.now() >= envelope.deadlineEpochMs) {
-    throw new DeadlineExceededError(envelope.deadlineEpochMs);
-  }
 }

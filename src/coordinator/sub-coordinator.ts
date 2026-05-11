@@ -8,6 +8,7 @@ import {
 } from './protocol';
 import type { WorkerLoader } from '../types';
 import { getStub } from './internal';
+import { balancedFill } from '../topology/plan';
 import { forkCancelStream } from '../transport/cancel-stream';
 import type { WorkerDOSession } from './worker-do';
 
@@ -136,46 +137,48 @@ async function dispatchOnEnv(
   const childCancelStreams = forkCancelStream(request.cancelStream, slices.length);
 
   // Dispatch each child in parallel.
-  const childPromises = slices.map(async ({ args: slice, slotBase }, i): Promise<RunOneResult[]> => {
-    if (slice.length === 0) return [];
-    try {
-      if (depth <= 1) {
-        // Hybrid leaf: one worker DO per job. CPU parallelism scales
-        // with leaf-DO count because each leaf runs in its own
-        // workerd process / V8 scheduler thread.
-        return await dispatchHybridLeaf(
-          env,
-          ownerId,
-          request,
-          slice,
-          slotBase,
-          i,
-          reqIdx,
-          childCancelStreams[i],
-          owner,
-        );
-      } else {
-        // Recurse into a deeper sub-coord with promise pipelining.
-        const nextChildSizes = balancedFillForTree(slice.length, branchingFactor);
-        const subId = `${ownerId}-r${reqIdx}-sub-${i}`;
-        const stub = getStub<SubCoordStub>(env.CfpSubCoord, subId, request.locationHint);
-        const session = stub.openTreeSession();
-        const result = await session.dispatch({
-          ...request,
-          argsList: slice,
-          planChildSizes: nextChildSizes,
-          depth: depth - 1,
-          // Propagate the global slot base into the next tier.
-          taskSlotBase: slotBase,
-          cancelStream: childCancelStreams[i],
-        });
-        return result.results;
+  const childPromises = slices.map(
+    async ({ args: slice, slotBase }, i): Promise<RunOneResult[]> => {
+      if (slice.length === 0) return [];
+      try {
+        if (depth <= 1) {
+          // Hybrid leaf: one worker DO per job. CPU parallelism scales
+          // with leaf-DO count because each leaf runs in its own
+          // workerd process / V8 scheduler thread.
+          return await dispatchHybridLeaf(
+            env,
+            ownerId,
+            request,
+            slice,
+            slotBase,
+            i,
+            reqIdx,
+            childCancelStreams[i],
+            owner,
+          );
+        } else {
+          // Recurse into a deeper sub-coord with promise pipelining.
+          const nextChildSizes = balancedFill(slice.length, branchingFactor);
+          const subId = `${ownerId}-r${reqIdx}-sub-${i}`;
+          const stub = getStub<SubCoordStub>(env.CfpSubCoord, subId, request.locationHint);
+          const session = stub.openTreeSession();
+          const result = await session.dispatch({
+            ...request,
+            argsList: slice,
+            planChildSizes: nextChildSizes,
+            depth: depth - 1,
+            // Propagate the global slot base into the next tier.
+            taskSlotBase: slotBase,
+            cancelStream: childCancelStreams[i],
+          });
+          return result.results;
+        }
+      } catch (err) {
+        // Whole-slice failure: fan out the error across slice indices.
+        return slice.map(() => errorToFailedResult(err));
       }
-    } catch (err) {
-      // Whole-slice failure: fan out the error across slice indices.
-      return slice.map(() => errorToFailedResult(err));
-    }
-  });
+    },
+  );
 
   const childResults = await Promise.all(childPromises);
   // Flatten in plan-order.
@@ -198,12 +201,13 @@ async function dispatchHybridLeaf(
   // One leaf DO per job — each leaf is a separate workerd process with
   // its own V8 scheduler thread. CPU parallelism scales linearly with
   // leaf count.
-  const leafBatches: Array<{ args: unknown[][]; slotBase: number; leafName: string }> =
-    slice.map((args, i) => ({
+  const leafBatches: Array<{ args: unknown[][]; slotBase: number; leafName: string }> = slice.map(
+    (args, i) => ({
       args: [args],
       slotBase: sliceSlotBase + i,
       leafName: `${ownerId}-r${reqIdx}-leaf-${sliceIdx}-${i}`,
-    }));
+    }),
+  );
   const leafCancelStreams = forkCancelStream(cancelStream, leafBatches.length);
 
   // F9 (perf-audit-findings.md): fire `noop()` to leaves that haven't
@@ -228,55 +232,43 @@ async function dispatchHybridLeaf(
   }
 
   const leafResults = await Promise.all(
-    leafBatches.map(async ({ args: batch, slotBase, leafName }, leafIdx): Promise<RunOneResult[]> => {
-      // F8: use the cached leaf stub.
-      let stub = owner.leafStubCache.get(leafName) as WorkerDOStub | undefined;
-      if (!stub) {
-        stub = getStub<WorkerDOStub>(
-          env.CfpWorkerDO,
-          leafName,
-          request.locationHint,
-        );
-        owner.leafStubCache.set(leafName, stub as unknown as DurableObjectStub);
-      }
-      try {
-        // Promise pipelining on the leaf DO.
-        const session = stub.openSession();
-        const result = await session.runBatch({
-          fnSource: request.fnSource,
-          fnHash: request.fnHash,
-          context: request.context,
-          workerOptions: request.workerOptions,
-          cacheKeyStrategy: request.cacheKeyStrategy,
-          argsList: batch,
-          envelope: request.envelope,
-          freshIsolate: false,
-          // Global slot offset for this leaf. With one job per leaf
-          // `batch.length === 1`, but the indexing is preserved for
-          // multi-job batches (e.g. callers driving `runBatch` directly).
-          taskSlotBase: slotBase,
-          cancelStream: leafCancelStreams[leafIdx],
-        });
-        return result.results;
-      } catch (err) {
-        // Invalidate cached stub on error — may be a transient leaf
-        // reset and the routing handle is stale.
-        owner.leafStubCache.delete(leafName);
-        return batch.map(() => errorToFailedResult(err));
-      }
-    }),
+    leafBatches.map(
+      async ({ args: batch, slotBase, leafName }, leafIdx): Promise<RunOneResult[]> => {
+        // F8: use the cached leaf stub.
+        let stub = owner.leafStubCache.get(leafName) as WorkerDOStub | undefined;
+        if (!stub) {
+          stub = getStub<WorkerDOStub>(env.CfpWorkerDO, leafName, request.locationHint);
+          owner.leafStubCache.set(leafName, stub as unknown as DurableObjectStub);
+        }
+        try {
+          // Promise pipelining on the leaf DO.
+          const session = stub.openSession();
+          const result = await session.runBatch({
+            fnSource: request.fnSource,
+            fnHash: request.fnHash,
+            context: request.context,
+            workerOptions: request.workerOptions,
+            cacheKeyStrategy: request.cacheKeyStrategy,
+            argsList: batch,
+            envelope: request.envelope,
+            freshIsolate: false,
+            // Global slot offset for this leaf. With one job per leaf
+            // `batch.length === 1`, but the indexing is preserved for
+            // multi-job batches (e.g. callers driving `runBatch` directly).
+            taskSlotBase: slotBase,
+            cancelStream: leafCancelStreams[leafIdx],
+          });
+          return result.results;
+        } catch (err) {
+          // Invalidate cached stub on error — may be a transient leaf
+          // reset and the routing handle is stale.
+          owner.leafStubCache.delete(leafName);
+          return batch.map(() => errorToFailedResult(err));
+        }
+      },
+    ),
   );
   const flat: RunOneResult[] = [];
   for (const r of leafResults) flat.push(...r);
   return flat;
-}
-
-/** Local copy to avoid cross-module dep cycle with topology/. */
-function balancedFillForTree(size: number, n: number): number[] {
-  if (size === 0) return new Array(n).fill(0);
-  const base = Math.floor(size / n);
-  const extras = size % n;
-  const out: number[] = [];
-  for (let i = 0; i < n; i++) out.push(base + (i < extras ? 1 : 0));
-  return out;
 }

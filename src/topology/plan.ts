@@ -17,7 +17,7 @@
  * `tests/unit/topology/plan.test.ts`.
  */
 
-export type TopologyName = 'loader-only' | 'in-do' | 'hybrid' | 'tree';
+export type TopologyName = 'in-do' | 'hybrid' | 'tree';
 
 export interface InDoPlan {
   topology: 'in-do';
@@ -60,13 +60,7 @@ export interface TreePlan {
   children: Array<HybridPlan | TreePlan>;
 }
 
-export interface LoaderOnlyPlan {
-  topology: 'loader-only';
-  /** size in 1..3 (Worker fetch handler cap). */
-  size: number;
-}
-
-export type TopologyPlan = InDoPlan | HybridPlan | TreePlan | LoaderOnlyPlan;
+export type TopologyPlan = InDoPlan | HybridPlan | TreePlan;
 
 // ---- balanced-fill distribution helper ---------------------------------
 
@@ -92,9 +86,7 @@ export function balancedFill(size: number, n: number, maxPerSlot?: number): numb
   if (n <= 0) return [];
   if (size <= 0) return new Array(n).fill(0);
   if (maxPerSlot !== undefined && n * maxPerSlot < size) {
-    throw new RangeError(
-      `balancedFill: n=${n} slots × maxPerSlot=${maxPerSlot} < size=${size}`,
-    );
+    throw new RangeError(`balancedFill: n=${n} slots × maxPerSlot=${maxPerSlot} < size=${size}`);
   }
   const out = new Array(n).fill(0) as number[];
   const base = Math.floor(size / n);
@@ -105,44 +97,9 @@ export function balancedFill(size: number, n: number, maxPerSlot?: number): numb
   if (maxPerSlot !== undefined) {
     for (const v of out) {
       if (v > maxPerSlot) {
-        throw new RangeError(
-          `balancedFill: slot value ${v} exceeds maxPerSlot=${maxPerSlot}`,
-        );
+        throw new RangeError(`balancedFill: slot value ${v} exceeds maxPerSlot=${maxPerSlot}`);
       }
     }
-  }
-  return out;
-}
-
-/**
- * @deprecated Pre-redesign helper for the "4 loaders per leaf DO"
- * topology. Retained for backward compatibility — the current
- * selector dispatches one job per leaf DO, so the cap-first
- * distribution is no longer used internally.
- *
- * Cap-first distribution. Fill `maxPerSlot`-at-a-time from index 0; the
- * last non-zero slot holds the remainder.
- *
- *   fillCapped(17, 5, 4)  -> [4, 4, 4, 4, 1]
- *   fillCapped(20, 5, 4)  -> [4, 4, 4, 4, 4]
- *   fillCapped(10, 3, 4)  -> [4, 4, 2]
- *
- * Throws `RangeError` if `n * maxPerSlot < size`.
- */
-export function fillCapped(size: number, n: number, maxPerSlot: number): number[] {
-  if (n <= 0) return [];
-  if (size <= 0) return new Array(n).fill(0);
-  if (n * maxPerSlot < size) {
-    throw new RangeError(
-      `fillCapped: n=${n} slots × maxPerSlot=${maxPerSlot} < size=${size}`,
-    );
-  }
-  const out = new Array(n).fill(0) as number[];
-  let remaining = size;
-  for (let i = 0; i < n && remaining > 0; i++) {
-    const here = Math.min(maxPerSlot, remaining);
-    out[i] = here;
-    remaining -= here;
   }
   return out;
 }

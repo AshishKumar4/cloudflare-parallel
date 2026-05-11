@@ -97,10 +97,7 @@ export class CfpWorkerDO extends DurableObject<WorkerDOEnv> {
  * Internal: shared between `CfpWorkerDO.runBatch` and the pipelinable
  * `WorkerDOSession.runBatch`.
  */
-async function runBatchOnEnv(
-  env: WorkerDOEnv,
-  request: RunBatchRequest,
-): Promise<RunBatchResult> {
+async function runBatchOnEnv(env: WorkerDOEnv, request: RunBatchRequest): Promise<RunBatchResult> {
   const runner = new LoaderRunner({
     loader: env.LOADER,
     callSite: 'do-method',
@@ -186,5 +183,3 @@ async function runBatchOnEnv(
   );
   return { results };
 }
-
-

@@ -1,25 +1,23 @@
 /**
- * Regression tests for `balancedFill` and `fillCapped` in
- * `src/topology/plan.ts`.
+ * Regression tests for `balancedFill` in `src/topology/plan.ts`.
  *
- * Background: a third-party review surfaced that the prior `balancedFill`
- * implementation was cap-first (fill 4-at-a-time, last slot remainder),
- * which the tree topology selector was calling with `maxPerSlot = size`.
- * That collapsed the tree to a chain — `balancedFill(512, 4, 512)`
- * returned `[512, 0, 0, 0]` instead of `[128, 128, 128, 128]`. Peak
- * parallelism was capped at the hybrid ceiling (4 × maxFanOut = 128)
- * regardless of size.
+ * Background: a third-party review surfaced that the prior
+ * `balancedFill` implementation was cap-first (fill 4-at-a-time, last
+ * slot remainder), which the tree topology selector was calling with
+ * `maxPerSlot = size`. That collapsed the tree to a chain —
+ * `balancedFill(512, 4, 512)` returned `[512, 0, 0, 0]` instead of
+ * `[128, 128, 128, 128]`. Peak parallelism was capped at the hybrid
+ * ceiling regardless of size.
  *
  * Fix: `balancedFill` now does true even distribution
- * (`floor(size/n)` base + 1-extra to first `size mod n` slots), and the
- * cap-first behaviour lives in `fillCapped` for the hybrid leaf shape.
+ * (`floor(size/n)` base + 1-extra to first `size mod n` slots).
  *
- * These tests pin both functions at the sizes the tree topology cares
- * about (N = 128 / 256 / 512 / 1024 / 2000 / 8192) so the regression can
- * never silently come back.
+ * These tests pin the function at the sizes the tree topology cares
+ * about (N = 128 / 256 / 512 / 1024 / 2000 / 8192) so the regression
+ * can never silently come back.
  */
 import { describe, expect, it } from 'bun:test';
-import { balancedFill, fillCapped } from '../../../src/topology/plan';
+import { balancedFill } from '../../../src/topology/plan';
 
 describe('balancedFill — even distribution across slots', () => {
   it('exactly even: 512 across 4 slots', () => {
@@ -136,36 +134,5 @@ describe('balancedFill — even distribution across slots', () => {
 
   it('with maxPerSlot at exactly the ceiling: passes through', () => {
     expect(balancedFill(17, 5, 4)).toEqual([4, 4, 3, 3, 3]);
-  });
-});
-
-describe('fillCapped — cap-first hybrid leaf shape', () => {
-  it('size=17, n=5, cap=4 → [4,4,4,4,1]', () => {
-    expect(fillCapped(17, 5, 4)).toEqual([4, 4, 4, 4, 1]);
-  });
-
-  it('size=20, n=5, cap=4 → 5×[4]', () => {
-    expect(fillCapped(20, 5, 4)).toEqual([4, 4, 4, 4, 4]);
-  });
-
-  it('size=128, n=32, cap=4 → 32×[4]', () => {
-    const out = fillCapped(128, 32, 4);
-    expect(out.length).toBe(32);
-    expect(out.every((v) => v === 4)).toBe(true);
-  });
-
-  it('size=10, n=3, cap=4 → [4,4,2]', () => {
-    expect(fillCapped(10, 3, 4)).toEqual([4, 4, 2]);
-  });
-
-  it('throws when n*cap < size', () => {
-    // 5 × 4 = 20 — exactly enough.
-    expect(() => fillCapped(20, 5, 4)).not.toThrow();
-    // 4 × 4 = 16 — not enough for size=20.
-    expect(() => fillCapped(20, 4, 4)).toThrow(RangeError);
-  });
-
-  it('size=0 returns all zeros', () => {
-    expect(fillCapped(0, 4, 4)).toEqual([0, 0, 0, 0]);
   });
 });

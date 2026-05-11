@@ -52,15 +52,12 @@ describe('error type guards', () => {
   });
 
   test('isExecutionError covers class hierarchy + Disconnected/OOM/Billing', async () => {
-    const { DisconnectedError, OutOfMemoryError, BillingLimitError } = await import(
-      '../../src/errors/index.js'
-    );
+    const { DisconnectedError, OutOfMemoryError, BillingLimitError } =
+      await import('../../src/errors/index.js');
     expect(isExecutionError(new ExecutionError('m'))).toBe(true);
     expect(isExecutionError(new DisconnectedError())).toBe(true);
     expect(isExecutionError(new OutOfMemoryError())).toBe(true);
-    expect(isExecutionError(
-      new BillingLimitError({ kind: 'cpuMs', limit: 30_000 }),
-    )).toBe(true);
+    expect(isExecutionError(new BillingLimitError({ kind: 'cpuMs', limit: 30_000 }))).toBe(true);
     expect(isExecutionError({ code: 'CFP_DISCONNECTED', message: 'm' })).toBe(true);
     expect(isExecutionError({ code: 'CFP_BACKPRESSURE', message: 'm' })).toBe(false);
   });

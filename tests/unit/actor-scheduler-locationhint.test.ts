@@ -50,7 +50,12 @@ function fakeNs(calls: GetCall[]): DurableObjectNamespace {
         cancel: async () => true,
         cancelByTenant: async () => 0,
         stats: async () => ({
-          queued: 0, leased: 0, done: 0, failed: 0, cancelled: 0, oldestQueuedAgeMs: 0,
+          queued: 0,
+          leased: 0,
+          done: 0,
+          failed: 0,
+          cancelled: 0,
+          oldestQueuedAgeMs: 0,
         }),
         configure: async () => ({ effective: {} }),
       } as unknown as DurableObjectStub;

@@ -659,14 +659,14 @@ export interface SchedulerStats extends PoolStats {
 }
 ```
 
-### 5.8 Testing surface — `Parallel.testing.*`
+### 5.8 Testing surface — `cloudflare-parallel/testing`
 
 ```ts
-import { Parallel } from 'cloudflare-parallel/testing';
+import { poolFake } from 'cloudflare-parallel/testing';
 import { test, expect } from 'bun:test';
 
 test('user fn produces correct sum', async () => {
-  const pool = Parallel.testing.poolFake<typeof bindings>({
+  const pool = poolFake<typeof bindings>({
     bindings: { KV: kvStub },
     runner: async (fn, args) => {
       // Default: round-trips args through structuredClone before invoking,
@@ -744,11 +744,6 @@ src/
     metrics.ts        — counters, histograms (Analytics Engine writes)
     tracing.ts        — span-shaped events; tracestate propagation
     tail.ts           — Tail-Worker auto-attach (sampling default 0.1)
-
-  config/
-    wrangler.ts       — programmatic wrangler.toml fragments (reserved Cfp* namespace)
-    doctor.ts         — `cloudflare-parallel doctor` CLI: validates wrangler.toml ↔ code shape
-    defaults.ts       — single source of truth for default values
 
   index.ts            — public re-exports
 
@@ -1189,9 +1184,10 @@ Replicate the loader-from-fetch test/B/C/D matrix; CI gate:
 
 ### 11.6 Testing-surface coverage
 
-- `Parallel.testing.poolFake` runs production-shape examples end-to-end with no `wrangler dev`.
-- `Parallel.testing.actorFake` preserves state across `submit` calls.
-- `Parallel.testing.schedulerFake` honors retries, deadlines, cancellation in-process.
+- `poolFake` (from `cloudflare-parallel/testing`) runs
+  production-shape examples end-to-end with no `wrangler dev`.
+- `actorFake` preserves state across `submit` calls.
+- `schedulerFake` honors retries, deadlines, cancellation in-process.
 - All fakes structured-clone-roundtrip args/state/return.
 
 ### 11.7 Type-narrowed pool tests

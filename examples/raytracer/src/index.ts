@@ -22,7 +22,7 @@ export {
   CfpWorkerDO,
   CfpSubCoord,
   CfpInProcessCoordinator,
-} from "cloudflare-parallel/durable-objects";
+} from 'cloudflare-parallel/durable-objects';
 
 interface Env {
   LOADER: WorkerLoader;
@@ -98,20 +98,14 @@ export default {
       const aspect = spec.width / spec.height;
       const tanHalf = Math.tan(fov / 2);
 
-      const dot = (a: number[], b: number[]): number =>
-        a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+      const dot = (a: number[], b: number[]): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
       const sub = (a: number[], b: number[]): number[] => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
       const norm = (v: number[]): number[] => {
         const n = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) || 1;
         return [v[0] / n, v[1] / n, v[2] / n];
       };
 
-      const intersectSphere = (
-        ro: number[],
-        rd: number[],
-        c: number[],
-        r: number,
-      ): number => {
+      const intersectSphere = (ro: number[], rd: number[], c: number[], r: number): number => {
         const oc = sub(ro, c);
         const b = dot(oc, rd);
         const cc = dot(oc, oc) - r * r;
@@ -183,7 +177,9 @@ export default {
       const bytes: number[] = [];
       for (let py = spec.y0; py < spec.y1; py++) {
         for (let px = 0; px < spec.width; px++) {
-          let r = 0, g = 0, b = 0;
+          let r = 0,
+            g = 0,
+            b = 0;
           for (let s = 0; s < spec.spp; s++) {
             const sx = (s & 1) * 0.5 - 0.25;
             const sy = ((s >> 1) & 1) * 0.5 - 0.25;
