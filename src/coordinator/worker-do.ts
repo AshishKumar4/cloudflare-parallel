@@ -106,6 +106,7 @@ async function runBatchOnEnv(env: WorkerDOEnv, request: RunBatchRequest): Promis
       request.workerOptions,
       env as unknown as Record<string, unknown>,
     ),
+    allowList: request.allowList,
   });
 
   // Global slot base for this leaf — supplied by the coordinator so the

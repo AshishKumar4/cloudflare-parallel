@@ -1,4 +1,4 @@
-name = "cloudflare-parallel-prod-tests"
+name = "cloudflare-parallel"
 main = "src/index.ts"
 # Compatibility date 2025-11-17+ enables `ctx.exports.<WorkerEntrypoint>`
 # loopback bindings by default — no extra flag needed.
@@ -35,3 +35,6 @@ new_sqlite_classes = [
 
 [vars]
 VM_TOKEN = "dev-prod-test-token-min-16-chars-please"
+
+[assets]
+directory = "../../../demo/public"

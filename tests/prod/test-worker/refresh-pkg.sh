@@ -1,9 +1,9 @@
 #!/bin/bash
-# Rebuild the local cloudflare-parallel tarball that the test worker
+# Rebuild the local cloudflare-parallel tarball that the deployed Worker
 # consumes, then re-install. Run from any directory; the script resolves
 # its own location.
 #
-# Why a tarball? The test worker depends on the library's source tree
+# Why a tarball? The Worker depends on the library's source tree
 # above it. Bun's `file:../../../` install copies the WHOLE working
 # directory including the library's own `node_modules`, which produces a
 # recursive `examples/scheduler/node_modules/cloudflare-parallel/...`

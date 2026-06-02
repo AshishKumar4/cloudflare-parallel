@@ -93,19 +93,19 @@ budget × 128 leaf DOs ≈ 64 minutes of compute available within a single
 
 ## Live numbers
 
-The deployed test worker
-([`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev))
-runs the same Mandelbrot CPU bench at every topology size. Latest
-numbers in [`bench-results-live.json`](../bench-results-live.json):
+The deployed Worker
+([`cloudflare-parallel.ashishkmr472.workers.dev`](https://cloudflare-parallel.ashishkmr472.workers.dev))
+runs the same Mandelbrot CPU bench at every topology size. Current
+checked-in numbers are from `2026-05-11T04:06:48.661Z` in
+[`bench-results-live.json`](../bench-results-live.json):
 
 ```
-size=1    in-do                    single-isolate dispatch floor (~10 ms)
-size=4    hybrid (4 leaves)        speedup ≈ 3.3×
-size=16   hybrid (16 leaves)       speedup ≈ 12.6×
-size=64   tree [8,8]               speedup ≈ 19.7×
-size=128  tree [8,16]              speedup ≈ 35.7×
-size=256  tree [8,32]              speedup ≈ 91×
-size=512  tree (depth 2)           speedup ≈ 144×
+size=4    hybrid (4 leaves)        speedup ≈ 3.0×
+size=16   hybrid (16 leaves)       speedup ≈ 11.4×
+size=64   tree [8,8]               speedup ≈ 36.3×
+size=128  tree [8,16]              speedup ≈ 50.8×
+size=256  tree [8,32]              speedup ≈ 190.9×
+size=512  tree (depth 2)           speedup ≈ 374×
 ```
 
 These are honest numbers, measured warm-of-many on the live edge.

@@ -1,7 +1,7 @@
 "use strict";
 /**
- * Demo site frontend. Talks to the deployed test worker
- * (cloudflare-parallel-prod-tests) for every primitive demonstration.
+ * Demo site frontend. Talks to the same Worker origin for every
+ * primitive demonstration.
  *
  * No framework. Plain DOM, ~30 KB compiled. Vanilla CSS in style.css.
  *
@@ -9,7 +9,7 @@
  * a real Cloudflare deployment, with honest live numbers — not local
  * the Workers runtime, not mocked, not pre-recorded.
  */
-const API = 'https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev';
+const API = location.origin;
 const VM_TOKEN_DEFAULT = 'dev-prod-test-token-min-16-chars-please';
 // ---------- helpers --------------------------------------------------
 async function apiPost(path, body, headers) {
@@ -85,7 +85,7 @@ themeBtn?.addEventListener('click', () => {
  * fanning out across 4·F^K isolates, parallel wall stays roughly
  * constant as N scales while sequential blows up linearly.
  *
- * The values are inputs to `/workload/mandelbrot`; the test worker
+ * The values are inputs to `/workload/mandelbrot`; the Worker
  * already validates and clamps them server-side.
  */
 const INTENSITY_PRESETS = {

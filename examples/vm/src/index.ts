@@ -37,9 +37,9 @@ interface CtxWithExports extends ExecutionContext {
 
 export default {
   fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    // Pool options live at the top level (the deprecated nested `pool:`
-    // shape was removed; see CHANGELOG for v0.3). `inProcess` skips the
-    // DO hop for size-≤4 submits — single-shot VM calls land there.
+    // Pool options live at the top level. The deprecated nested `pool:`
+    // shape is still accepted, but the flat shape is preferred.
+    // `inProcess` skips the DO hop for single-shot VM calls.
     return Parallel.vm<Record<string, never>>(env, {
       timeout: 5_000,
       retries: 1,

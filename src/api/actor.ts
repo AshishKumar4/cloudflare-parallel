@@ -9,6 +9,7 @@ import {
 import { buildEnvelope } from '../transport/deadline-prop';
 import { dispatchWithResilience } from '../transport/rpc-client';
 import type { ActorOptions, PoolEnv, SubmitOptions } from './options';
+import { bindingAllowList } from './bindings';
 
 import type {
   CoordinatorRunRequest,
@@ -27,6 +28,7 @@ interface ActorCoordinatorStub {
     context?: Record<string, unknown>;
     workerOptions?: CoordinatorRunRequest['workerOptions'];
     cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
+    allowList?: string[];
     envelope: DispatchEnvelope;
   }): Promise<RunOneResult>;
   actorClose(): Promise<void>;
@@ -160,6 +162,7 @@ export class ActorHandle<
             limits: this.#opts.limits ?? this.#opts.workerOptions?.limits,
           }),
           cacheKeyStrategy: this.#opts.cacheKeyStrategy ?? 'stable',
+          allowList: bindingAllowList(this.#opts.bindings as Record<string, unknown> | undefined),
           envelope,
         }),
       {

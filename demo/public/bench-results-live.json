@@ -1,5 +1,5 @@
 {
-  "target": "https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev",
+  "target": "https://cloudflare-parallel.ashishkmr472.workers.dev",
   "ts": "2026-05-11T04:06:48.661Z",
   "methodology": {
     "warmupRuns": 8,

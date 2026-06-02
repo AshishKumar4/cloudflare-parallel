@@ -6,6 +6,7 @@ import type { JobStore, PersistedJob } from './job-store';
 import { type DispatchEnvelope, type RunOneRequest } from '../coordinator/protocol';
 import type { JobStatus, RetryPolicy } from '../api/options';
 import { Dispatcher, DEFAULT_DISPATCHER_CONFIG, type DispatcherConfig } from './dispatcher';
+import { wireToWorkerOptions } from '../coordinator/internal';
 
 const ALARM_SWEEP_MS = 5_000;
 const IDLE_ALARM_MS = 60_000;
@@ -49,6 +50,7 @@ export interface SchedulerEnqueueRequest {
   meta?: Record<string, string>;
   idempotencyKey?: string;
   workerOptions?: RunOneRequest['workerOptions'];
+  allowList?: string[];
   cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
 }
 
@@ -71,6 +73,8 @@ export class CfpSchedulerDO extends DurableObject<SchedulerDOEnv> {
       fnSource: req.fnSource,
       args: req.args,
       context: req.context,
+      workerOptions: req.workerOptions,
+      allowList: req.allowList,
       meta: req.meta,
       createdAt: Date.now(),
       deadlineEpochMs: req.deadlineEpochMs,
@@ -262,6 +266,11 @@ export class CfpSchedulerDO extends DurableObject<SchedulerDOEnv> {
       // Honor the per-job strategy enqueued by the caller. Defaults to
       // `'stable'` — same as `PoolOptions.cacheKeyStrategy` default.
       cacheKeyStrategy: job.cacheKeyStrategy ?? 'stable',
+      workerOptions: wireToWorkerOptions(
+        job.workerOptions,
+        this.env as unknown as Record<string, unknown>,
+      ),
+      allowList: job.allowList,
     });
     const envelope: DispatchEnvelope = {
       deadlineEpochMs: job.deadlineEpochMs,

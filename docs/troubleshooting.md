@@ -15,7 +15,7 @@ ParallelError
 ├── ExecutionError                  CFP_EXECUTION                  500
 │   ├── DisconnectedError           CFP_DISCONNECTED               502
 │   ├── OutOfMemoryError            CFP_OUT_OF_MEMORY              507
-│   └── BillingLimitError           CFP_BILLING_LIMIT              429
+│   └── BillingLimitError           CFP_BILLING_LIMIT              402
 ├── TimeoutError                    CFP_TIMEOUT                    504
 ├── RetryExhaustedError             CFP_RETRY_EXHAUSTED            503
 ├── BindingError                    CFP_BINDING                    500
@@ -80,13 +80,13 @@ pool.submit(async (greeting: string, name: string) => `${greeting}, ${name}`, 'h
 // ✅ pass everything as args
 ```
 
-Or use `pool.context`:
+Or use `context` for generated or submitted source. Context is embedded
+as module-scope constants in the loaded worker source; it is not added
+to `env`.
+
 ```ts
 const pool = Parallel.pool(env, { context: { greeting: 'hello' } });
-pool.submit(
-  async (name: string, env: { greeting: string }) => `${env.greeting}, ${name}`,
-  'world',
-);
+pool.submitSource('(name) => `${greeting}, ${name}`', ['world']);
 ```
 
 ### "BackpressureError on every submit"

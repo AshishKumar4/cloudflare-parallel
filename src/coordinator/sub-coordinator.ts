@@ -249,6 +249,7 @@ async function dispatchHybridLeaf(
             context: request.context,
             workerOptions: request.workerOptions,
             cacheKeyStrategy: request.cacheKeyStrategy,
+            allowList: request.allowList,
             argsList: batch,
             envelope: request.envelope,
             freshIsolate: false,

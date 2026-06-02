@@ -16,9 +16,10 @@ interface CFQueue<T = unknown> {
  * `DoStorageJobStore` and **delivery** to the Queue. Claim is a no-op (the
  * Queue's consumer Worker dispatches; the SchedulerDO just bookkeeps).
  *
- * Construct via `new QueuesJobStore(env.MY_QUEUE, shadowStore)` and
- * pass to `SchedulerOptions.store` to wire a Cloudflare Queue as the
- * delivery backbone.
+ * Construct via `new QueuesJobStore(env.MY_QUEUE, shadowStore)` only in
+ * lower-level Dispatcher integrations. The public `Parallel.scheduler`
+ * constructor uses `CfpSchedulerDO` + DO SQLite storage and rejects
+ * `SchedulerOptions.store` values other than `'do-storage'`.
  */
 export class QueuesJobStore implements JobStore {
   readonly #queue: CFQueue<PersistedJob>;

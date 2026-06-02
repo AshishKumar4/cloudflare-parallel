@@ -10,7 +10,6 @@
       content="Live, interactive showcase of cloudflare-parallel. CPU-bound parallel computing on Cloudflare Workers. N parallel V8 isolates per request, one job per leaf Durable Object."
     />
     <link rel="icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23f6821f'/%3E%3Ctext x='3' y='12' fill='white' font-family='monospace' font-size='10' font-weight='bold'%3EP%3C/text%3E%3C/svg%3E" />
-    <link rel="preconnect" href="https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev" />
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
@@ -174,7 +173,7 @@
           <a class="src-link" href="https://github.com/AshishKumar4/cloudflare-parallel/blob/main/src/api/pool.ts" target="_blank" rel="noopener">view source</a>
         </div>
         <p class="panel-desc">
-          Each card runs against the live test worker. The code shown is the
+          Each card runs against the live Worker. The code shown is the
           actual call being made.
         </p>
         <div class="prim-grid" id="prim-grid"><!-- populated by JS --></div>
@@ -313,8 +312,8 @@ await pool.submit(longLoop, iters, { cancel });
 
       <footer class="container ftr">
         <div class="ftr-row">
-          <span>Backend: <a href="https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev/health" target="_blank" rel="noopener"><code>cloudflare-parallel-prod-tests</code></a></span>
-          <span>Frontend: Cloudflare Pages · vanilla TS · ~30 KB</span>
+          <span>Worker: <a href="/health" target="_blank" rel="noopener"><code>cloudflare-parallel</code></a></span>
+          <span>Frontend: Worker static assets · vanilla TS · ~30 KB</span>
           <span><a href="https://github.com/AshishKumar4/cloudflare-parallel" target="_blank" rel="noopener">github.com/AshishKumar4/cloudflare-parallel</a></span>
         </div>
       </footer>

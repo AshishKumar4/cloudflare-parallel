@@ -2,7 +2,13 @@ import { BindingError, MissingBindingError, ResultExpiredError } from '../errors
 import { hashSource, serializeFunction } from '../loader/serialize';
 import { leafErrorToTypedError } from './error-decode';
 import { emitObservabilityEvent } from '../observability/index';
-import { getStub, locationHintForColo, type LocationHint } from '../coordinator/internal';
+import {
+  getStub,
+  locationHintForColo,
+  workerOptionsToWire,
+  type LocationHint,
+} from '../coordinator/internal';
+import { bindingAllowList } from './bindings';
 import type {
   Job,
   JobHandle,
@@ -86,6 +92,7 @@ export class Scheduler<
   readonly #env: PoolEnv;
   readonly #opts: SchedulerOptions<B, C>;
   readonly #locationHint: LocationHint | undefined;
+  #initialConfigFlight: Promise<void> | undefined;
 
   constructor(env: PoolEnv, opts: SchedulerOptions<B, C>) {
     if (!env.LOADER || typeof env.LOADER.get !== 'function') {
@@ -96,6 +103,25 @@ export class Scheduler<
     }
     if (!opts.id) {
       throw new BindingError('Parallel.scheduler() requires `opts.id`');
+    }
+    if (opts.store && opts.store !== 'do-storage') {
+      throw new BindingError(
+        'Parallel.scheduler() currently uses the SchedulerDO SQLite store. ' +
+          '`store: "d1"`, `store: "queues"`, and custom JobStore instances are lower-level ' +
+          'adapters and are not selectable through the public Scheduler constructor.',
+      );
+    }
+    if (opts.fairness) {
+      throw new BindingError(
+        'Parallel.scheduler() does not support `fairness.keyFrom` in the public constructor. ' +
+          'Set `job.tenantId` on enqueue and use `fairCapacityPerTenant` for per-tenant limits.',
+      );
+    }
+    if (opts.alarmCadence) {
+      throw new BindingError(
+        'Parallel.scheduler() does not currently expose alarm cadence tuning; ' +
+          'the SchedulerDO uses built-in active/idle alarm intervals.',
+      );
     }
     this.#env = env;
     this.#opts = opts;
@@ -108,6 +134,30 @@ export class Scheduler<
 
   #stub(): SchedulerStub {
     return getStub<SchedulerStub>(this.#env.CfpSchedulerDO!, this.#opts.id, this.#locationHint);
+  }
+
+  #initialConfig(): SchedulerConfigureInput | undefined {
+    const cfg: SchedulerConfigureInput = {};
+    if (this.#opts.inFlightLimit !== undefined) cfg.inFlightLimit = this.#opts.inFlightLimit;
+    if (this.#opts.maxQueueDepth !== undefined) cfg.maxQueueDepth = this.#opts.maxQueueDepth;
+    if (this.#opts.fairCapacityPerTenant !== undefined) {
+      cfg.fairCapacityPerTenant = this.#opts.fairCapacityPerTenant;
+    }
+    if (this.#opts.resultRetention?.ttlMs !== undefined) {
+      cfg.resultTtlMs = this.#opts.resultRetention.ttlMs;
+    }
+    return Object.keys(cfg).length > 0 ? cfg : undefined;
+  }
+
+  async #ensureInitialConfig(): Promise<void> {
+    const cfg = this.#initialConfig();
+    if (!cfg) return;
+    if (!this.#initialConfigFlight) {
+      this.#initialConfigFlight = this.#stub()
+        .configure(cfg)
+        .then(() => undefined);
+    }
+    await this.#initialConfigFlight;
   }
 
   /**
@@ -126,6 +176,7 @@ export class Scheduler<
    *   `maxQueueDepth`.
    */
   async enqueue<A extends unknown[], R>(job: Job<A, R>): Promise<JobHandle<R>> {
+    await this.#ensureInitialConfig();
     const fnSource = serializeFunction(job.fn);
     const fnHash = hashSource(fnSource);
     const id = `j-${fnHash}-${Math.random().toString(36).slice(2, 10)}`;
@@ -146,6 +197,17 @@ export class Scheduler<
       retry: job.retry ?? this.#opts.retry ?? DEFAULT_RETRY,
       meta: job.meta,
       idempotencyKey: job.idempotencyKey,
+      workerOptions: workerOptionsToWire({
+        compatibilityDate: this.#opts.workerOptions?.compatibilityDate,
+        compatibilityFlags: this.#opts.workerOptions?.compatibilityFlags,
+        globalOutbound:
+          this.#opts.globalOutbound !== undefined
+            ? this.#opts.globalOutbound
+            : this.#opts.workerOptions?.globalOutbound,
+        limits: this.#opts.limits ?? this.#opts.workerOptions?.limits,
+        tailBindingName: this.#opts.observability?.tail?.bindingName,
+      }),
+      allowList: bindingAllowList(this.#opts.bindings as Record<string, unknown> | undefined),
       cacheKeyStrategy: this.#opts.cacheKeyStrategy ?? 'stable',
     });
     emitObservabilityEvent(this.#opts.observability, {
@@ -223,6 +285,7 @@ export class Scheduler<
    * `leased === 0`. End-of-test convenience.
    */
   async drain(): Promise<void> {
+    await this.#ensureInitialConfig();
     for (;;) {
       const s = await this.#stub().stats();
       if (s.queued === 0 && s.leased === 0) return;
@@ -236,6 +299,7 @@ export class Scheduler<
    * See {@link SchedulerStats}.
    */
   async stats(): Promise<SchedulerStats> {
+    await this.#ensureInitialConfig();
     const s = await this.#stub().stats();
     return {
       inFlight: s.leased,
@@ -264,6 +328,7 @@ export class Scheduler<
    * await scheduler.configure({ inFlightLimit: 64, fairCapacityPerTenant: 8 });
    */
   async configure(c: SchedulerConfigureInput): Promise<SchedulerConfigSnapshot> {
+    await this.#ensureInitialConfig();
     const r = await this.#stub().configure(c);
     return r.effective;
   }

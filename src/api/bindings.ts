@@ -30,3 +30,14 @@ export function pickBindings<E, K extends keyof E & string>(
   for (const key of keys) if (key in src) out[key] = src[key];
   return out as Pick<E, K>;
 }
+
+/**
+ * Convert an optional `bindings:` declaration into the allow-list sent to
+ * coordinator DOs. `undefined` preserves the historical "forward all safe
+ * env keys" behavior; an empty object intentionally means "forward none".
+ */
+export function bindingAllowList(
+  bindings: Record<string, unknown> | undefined,
+): string[] | undefined {
+  return bindings ? Object.keys(bindings) : undefined;
+}

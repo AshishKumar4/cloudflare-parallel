@@ -72,6 +72,8 @@ export interface CoordinatorFanOutRequest {
   context?: Record<string, unknown>;
   cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
   workerOptions?: RunOneRequest['workerOptions'];
+  /** Bindings allow-list (intersected with every receiving DO's own env). */
+  allowList?: string[];
   argsList: unknown[][];
   envelope: DispatchEnvelope;
   freshIsolate?: boolean;
@@ -367,6 +369,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
         request.workerOptions,
         this.env as unknown as Record<string, unknown>,
       ),
+      allowList: request.allowList,
     });
     try {
       const value = await runner.runOne({
@@ -489,6 +492,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
           context: request.context,
           workerOptions: request.workerOptions,
           cacheKeyStrategy: request.cacheKeyStrategy,
+          allowList: request.allowList,
           argsList: slice,
           // Tell the sub-coord to slice its received argsList per its own children.
           planChildSizes: planSliceChildSizes(plan.children[subIdx]),
@@ -562,6 +566,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
     context?: Record<string, unknown>;
     workerOptions?: RunOneRequest['workerOptions'];
     cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
+    allowList?: string[];
     envelope: DispatchEnvelope;
   }): Promise<RunOneResult> {
     const state = (await this.ctx.storage.get<unknown>(ACTOR_STATE_KEY)) ?? {};
@@ -573,6 +578,7 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
         req.workerOptions,
         this.env as unknown as Record<string, unknown>,
       ),
+      allowList: req.allowList,
     });
     try {
       // Actor mode dispatches the actor-class codegen. The runner
@@ -704,6 +710,7 @@ async function invokeLeafBatchWithRetry(
     context: request.context,
     workerOptions: request.workerOptions,
     cacheKeyStrategy: request.cacheKeyStrategy,
+    allowList: request.allowList,
     argsList: slice,
     envelope: request.envelope,
     freshIsolate: request.freshIsolate,

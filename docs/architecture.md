@@ -63,11 +63,11 @@ is its own workerd process. Selector inputs: `topology` (override),
 
 ```
 1. Pool.map(fn, items)
-2. ├─ serialize fn → fnSource (string), fnHash (sha256)
+2. ├─ serialize fn → fnSource (string), fnHash (stable djb2/base36 hash)
 3. ├─ build envelope { deadlineEpochMs, mode, signal: { cancelled: false } }
 4. ├─ select topology(items.length) → plan
 5. ├─ stub = ns.get(coordinatorId)
-6. └─ stub.runMany({ fnSource, fnHash, argsList, plan, ... })
+6. └─ stub.runMany({ fnSource, fnHash, argsList, allowList, selector, ... })
        │
 7.     ├─ Coordinator.runMany → walk plan
 8.     │   ├─ in-do leaf (size = 1): runner.runOne in the coordinator's isolate
@@ -84,6 +84,13 @@ Leaf DO names are stable (`${coordId}-leaf-${i}` and
 `${subCoordId}-r0-leaf-${sliceIdx}-${leafIdx}`) so subsequent
 fan-outs of the same shape reuse the same warm leaves and skip the
 ~300–400 ms first-RPC creation cost (DESIGN §13).
+
+Bindings on DO-backed paths are name-gated, not value-cloned from the
+caller. `PoolOptions.bindings`, `ActorOptions.bindings`, and
+`SchedulerOptions.bindings` become an allow-list carried over RPC; the
+receiving DO resolves those keys from its own env and the loader strips
+`LOADER`, `Cfp*`, and internal `cfp*` bindings before the loaded
+isolate sees `env`.
 
 ## Reactive scheduler dispatch
 
@@ -109,6 +116,14 @@ Throughput: bounded by `inFlightLimit` (default 32 in-flight jobs).
 Jobs running on the scheduler DO's own thread serialize on CPU but
 overlap on I/O. For CPU-heavy workloads, submit map fan-outs via
 `Parallel.pool` so the work spreads across leaf DOs.
+
+The public `Scheduler` constructor wires `inFlightLimit`,
+`maxQueueDepth`, `fairCapacityPerTenant`, `resultRetention`,
+`cacheKeyStrategy`, binding allow-lists, and worker options. It rejects
+unsupported constructor fields (`store` other than `'do-storage'`,
+`fairness.keyFrom`, and `alarmCadence`) instead of silently ignoring
+them. D1 and Queues job stores are lower-level adapters, not selectable
+through the public Scheduler constructor.
 
 ## Cancellation
 

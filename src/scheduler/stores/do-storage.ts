@@ -1,7 +1,7 @@
 import type { JobStatus } from '../../api/options';
 import type { ClaimRequest, JobEvent, JobStore, PersistedJob } from '../job-store';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /**
  * Default JobStore: the SchedulerDO's own SQLite storage.
@@ -41,6 +41,8 @@ export class DoStorageJobStore implements JobStore {
       fn_source TEXT NOT NULL,
       args BLOB NOT NULL,
       context BLOB,
+      worker_options BLOB,
+      allow_list TEXT,
       meta TEXT,
       created_at INTEGER NOT NULL,
       deadline_ms INTEGER NOT NULL,
@@ -61,12 +63,28 @@ export class DoStorageJobStore implements JobStore {
     // SQLite ALTER TABLE ... ADD COLUMN is idempotent for existing
     // deployments — column is nullable and defaults to NULL (which
     // the runtime treats as `'stable'`).
-    if (currentSchema > 0 && currentSchema < 2) {
+    if (currentSchema < 2) {
       try {
         this.#sql.exec(`ALTER TABLE jobs ADD COLUMN cache_key_strategy TEXT`);
       } catch {
         // Column already exists (race or partial migration); fine.
       }
+    }
+    // Migration: schema v2 → v3 persists per-job worker options and the
+    // binding allow-list used at execution time.
+    if (currentSchema < 3) {
+      try {
+        this.#sql.exec(`ALTER TABLE jobs ADD COLUMN worker_options BLOB`);
+      } catch {
+        // Column already exists; fine.
+      }
+      try {
+        this.#sql.exec(`ALTER TABLE jobs ADD COLUMN allow_list TEXT`);
+      } catch {
+        // Column already exists; fine.
+      }
+    }
+    if (currentSchema < SCHEMA_VERSION) {
       this.#sql.exec(`UPDATE cfp_meta SET value = ? WHERE key = 'schema'`, String(SCHEMA_VERSION));
     }
     this.#sql.exec(
@@ -88,20 +106,24 @@ export class DoStorageJobStore implements JobStore {
   async enqueue(job: PersistedJob): Promise<void> {
     const args = enc(job.args);
     const ctx = job.context ? enc(job.context) : null;
+    const workerOptions = job.workerOptions ? enc(job.workerOptions) : null;
+    const allowList = job.allowList ? JSON.stringify(job.allowList) : null;
     const meta = job.meta ? JSON.stringify(job.meta) : null;
     try {
       this.#sql.exec(
         `INSERT INTO jobs (
-          id, tenant_id, fn_hash, fn_source, args, context, meta,
+          id, tenant_id, fn_hash, fn_source, args, context, worker_options, allow_list, meta,
           created_at, deadline_ms, retry_max, retry_count, retry_base_ms, retry_backoff,
           status, idempotency_key, cache_key_strategy
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
         job.id,
         job.tenantId,
         job.fnHash,
         job.fnSource,
         args,
         ctx,
+        workerOptions,
+        allowList,
         meta,
         job.createdAt,
         job.deadlineEpochMs,
@@ -401,6 +423,8 @@ type JobsRow = {
   fn_source: string;
   args: ArrayBuffer;
   context: ArrayBuffer | null;
+  worker_options: ArrayBuffer | null;
+  allow_list: string | null;
   meta: string | null;
   created_at: number;
   deadline_ms: number;
@@ -426,6 +450,10 @@ function rowToJob(row: JobsRow): PersistedJob {
     fnSource: row.fn_source,
     args: dec(row.args) as unknown[],
     context: row.context ? (dec(row.context) as Record<string, unknown>) : undefined,
+    workerOptions: row.worker_options
+      ? (dec(row.worker_options) as PersistedJob['workerOptions'])
+      : undefined,
+    allowList: row.allow_list ? (JSON.parse(row.allow_list) as string[]) : undefined,
     meta: row.meta ? JSON.parse(row.meta) : undefined,
     createdAt: row.created_at,
     deadlineEpochMs: row.deadline_ms,

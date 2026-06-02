@@ -1,23 +1,22 @@
-# cloudflare-parallel-demo
+# cloudflare-parallel demo assets
 
 The interactive showcase site for [`cloudflare-parallel`](https://github.com/AshishKumar4/cloudflare-parallel).
 
-Live: [**cloudflare-parallel-demo.pages.dev**](https://cloudflare-parallel-demo.pages.dev)
+Live: [**cloudflare-parallel.ashishkmr472.workers.dev**](https://cloudflare-parallel.ashishkmr472.workers.dev)
 
 ## Architecture
 
-Two pieces:
+One Worker deployment:
 
 1. **Static frontend** (this directory) — vanilla TypeScript + CSS, no
-   framework. Compiles to a single `public/` tree served by Cloudflare
-   Pages. ~30 KB of JS after compile.
-2. **Backend** — the already-deployed test worker
-   `cloudflare-parallel-prod-tests` (see `tests/prod/test-worker/`). It
-   has every library DO + LOADER binding and exposes one HTTP route per
-   primitive. The frontend calls it cross-origin with CORS.
+   framework. Compiles to a single `public/` tree served as Worker static
+   assets. ~30 KB of JS after compile.
+2. **Backend endpoints** (`tests/prod/test-worker/`) — the same Worker has
+   every library DO + LOADER binding and exposes one HTTP route per
+   primitive. The frontend calls those endpoints on the same origin.
 
-This split avoids re-deploying the same backend twice. Pages site
-serves the UI; the test worker serves the live primitive endpoints.
+The result is one deployed URL for both UI and API:
+`https://cloudflare-parallel.ashishkmr472.workers.dev`.
 
 ## Run locally
 
@@ -29,19 +28,19 @@ bun run build              # tsc → public/app.js
 bun --bun -e 'Bun.serve({ port: 4173, fetch: (req) => new Response(Bun.file(`public${new URL(req.url).pathname === "/" ? "/index.html" : new URL(req.url).pathname}`)) })'
 ```
 
-The frontend always points at the deployed test worker (`API` constant
-at the top of `src/app.ts`). Edit it to point at a local
-`wrangler dev --local` instance if you're modifying the backend.
+The frontend points at `location.origin`, so the deployed UI and API stay
+on the same Worker origin. Use a local static server plus
+`wrangler dev --local` only when debugging the frontend/backend split.
 
 ## Deploy
 
 ```bash
 cd demo
-npm run deploy             # tsc → wrangler pages deploy
+npm run deploy             # tsc → refresh package → wrangler deploy
 ```
 
-This deploys to the `cloudflare-parallel-demo` Pages project on the
-Cloudflare account whose CLI is logged in.
+This deploys the single `cloudflare-parallel` Worker on the Cloudflare
+account whose CLI is logged in.
 
 ## Panels
 

@@ -52,10 +52,10 @@ const rows = await pool.map((y: number) => {
 **This library is for CPU-bound parallelism on Cloudflare Workers.** If you're awaiting I/O (`fetch`, KV reads, AI calls, R2 GETs, D1 queries), `Promise.all` on a single isolate already gives you that — the JavaScript event loop interleaves I/O for free. Where this library shines is offloading **CPU-heavy work** — embeddings, hashing, image transforms, parsing, simulation, codegen — to N parallel V8 isolates so the single-threaded event loop doesn't bottleneck you.
 
 - **N parallel V8 isolates per request.** Each task in a `pool.map` lands on its own leaf Durable Object — and each leaf DO is its own workerd process with its own V8 scheduler thread. CPU parallelism scales linearly with DO count, not with loaders-per-DO (loaders inside one process share that process's thread and serialize on CPU).
-- **Tree scaling beyond `maxFanOut`.** Once the fan-out exceeds the per-coordinator RPC cap (default 32), the auto-selector promotes to a multi-tier coordinator → sub-coordinator → leaf shape with branching factor `F`. Total leaves `F^K` (depth K, branching F).
+- **Tree scaling beyond `maxFanOut`.** Once the fan-out exceeds the per-coordinator RPC cap (default 32), the auto-selector promotes to a multi-tier coordinator → sub-coordinator → leaf shape with branching factor `F`, keeping each coordinator tier under the fan-out cap while preserving one job per leaf.
 - **Real `AbortSignal` cancellation.** Token cancel propagates end-to-end across the RPC boundary; pending awaits inside the loaded isolate reject with the cancel reason.
 - **Reactive scheduler.** Durable job queue with retries, deadlines, fair per-tenant queueing, idempotency keys.
-- **Live demo:** [cloudflare-parallel-demo.pages.dev](https://cloudflare-parallel-demo.pages.dev) (deployed) · [test worker](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev/health) · [bench numbers](bench-results-live.json).
+- **Live demo:** [cloudflare-parallel.ashishkmr472.workers.dev](https://cloudflare-parallel.ashishkmr472.workers.dev) (deployed) · [bench numbers](bench-results-live.json).
 
 ### When to use this library
 
@@ -90,7 +90,7 @@ name = "my-worker"
 main = "src/index.ts"
 compatibility_date = "2026-01-20"
 # Enables `ctx.exports.<WorkerEntrypoint>` loopback bindings — used by the
-# in-process coordinator below to skip the DO hop on small fan-outs.
+# in-process coordinator below to skip the DO hop for single-job dispatches.
 # https://developers.cloudflare.com/workers/configuration/compatibility-flags/#enable-ctxexports
 compatibility_flags = ["enable_ctx_exports"]
 
@@ -185,7 +185,11 @@ const code = `(a, b) => a * b * Math.PI`;
 const result = await pool.submitSource<number>(code, [3, 4]);
 ```
 
-### `pool.submitStream(fn, ...args, opts?)` — single task that streams output
+### `pool.submitStream(fn, ...args, opts?)` — single task that returns a stream
+
+`submitStream` is currently a single `submit` that expects the user fn
+to return a `ReadableStream`. It does not yet implement a separate
+multi-hop streaming protocol for fan-out or backpressure coordination.
 
 ```ts
 const stream = await pool.submitStream((n: number) => {
@@ -277,6 +281,17 @@ the cold-start cost at Worker startup rather than on first request.
 const safePool = pool.restrictTo(['KV']);  // user fns see only env.KV.
 ```
 
+### Binding model
+
+On `Parallel.loaderOnly`, `bindings` values are passed directly into the
+loaded isolate. On DO-backed paths (`Pool`, `Actor`, `Scheduler`), the
+receiving DO resolves binding values from its own `env`; the
+`bindings:` object declares the keys to allow through. If `bindings` is
+omitted, the library preserves the historical behavior and forwards all
+safe env keys after stripping `LOADER`, `Cfp*`, and internal `cfp*`
+bindings. Use `pickBindings(env, [...])` when you want an explicit
+allow-list.
+
 ### Cancellation: `SubmitOptions.cancel: CancelToken`
 
 ```ts
@@ -299,8 +314,8 @@ for adapting an inbound request's cancel.
 ## `Parallel.loaderOnly` — for the cheap path
 
 When you don't want to deploy the Coordinator DO and you can live with
-the 3-loader-from-fetch-handler cap. Same `submit` / `submitSource` /
-`map` / `scatter` / `gather` / `pmap` / `reduce` surface; no
+the 3-loader-from-fetch-handler cap. Same `submit` / `map` / `scatter`
+/ `gather` / `pmap` / `reduce` surface; no `submitSource` and no
 `mapStream` / `mapOrdered` / `submitStream` / `warm` / `drain` / `stats`
 / `handle` (those need the coordinator).
 
@@ -346,6 +361,10 @@ const value = await handle.result();   // long-poll until done
 ## `Parallel.vm` — HTTP submit-code
 
 Sandboxed per-request user code with required auth policy.
+`submitCodeHandler` and `Parallel.vm` default submitted code to
+`globalOutbound: null` unless the underlying pool explicitly opts into a
+different outbound policy. Normal `Parallel.pool` jobs inherit outbound
+access unless you set `globalOutbound: null`.
 
 ```ts
 import { Parallel, bearerAuth } from 'cloudflare-parallel';
@@ -384,9 +403,9 @@ size = 1            in-DO       single loaded isolate in the Worker process
                                   │L │ │L│ │L│     one job each — each leaf
                                   └──┘ └─┘ └─┘     is its own workerd process
 
-size > K            tree        coordinator → sub-coords → leaves; depth
-                                K, branching F. Total leaves = F^K (one
-                                job each).
+size > K            tree        coordinator → sub-coords → leaves. Each
+                                level branches up to F; leaf count equals
+                                the number of jobs, with one job per leaf.
 ```
 
 Where `K = maxFanOut` (default 32) — the per-coordinator RPC fan-out cap. Each leaf DO is a separate workerd process with its own V8 scheduler thread, so CPU parallelism scales linearly with leaf count.
@@ -413,7 +432,7 @@ The runtime collapses `openSession()` + `runBatch()` into a single Cap'n Proto s
 
 Mirror the pattern in your own RPC-heavy code: keep one held `RpcTarget` per remote DO, chain method calls without awaiting between them, and let the runtime pipeline the round-trips.
 
-### 2. In-process coordinator for small fan-outs
+### 2. In-process coordinator for single-job dispatch
 
 Pass `inProcess: ctx.exports.CfpInProcessCoordinator` to skip the Coordinator DO hop for `submit()` (and the rare `pool.map([x], fn)` of size = 1). The loopback stays inside the same Worker process — no inter-DO RPC, no cross-region routing — so per-call dispatch drops from tens of milliseconds to ~1–3 ms. Fan-outs of size ≥ 2 flow through the Coordinator DO so each task lands in its own leaf DO process — CPU parallelism only scales across separate workerd processes. [`ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/).
 
@@ -444,17 +463,17 @@ The actor's per-submit state checkpoint uses `ctx.storage.put(state, { allowUnco
 
 ```ts
 const pool = Parallel.pool(env, {
-  inProcess: ctx.exports.CfpInProcessCoordinator,    // small-N skips DO hop
+  inProcess: ctx.exports.CfpInProcessCoordinator,    // submit/size=1 skips DO hop
   requestColo: req.cf?.colo as string | undefined,   // colocate leaf DOs
   // autoWarm: true is the default — prewarm in parallel with first dispatch
 });
 ```
 
-The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed test worker with separate cold-run / warm-run reporting, equal warmup for both paths, and a median-of-5 sampling contract.
+The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed Worker with separate cold-run / warm-run reporting, equal warmup for both paths, and a median-of-5 sampling contract.
 
 ### Observed speedup curve
 
-Live numbers from the deployed test worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`). Numbers are warm (the auto-warm prewarm absorbs the cold-start path), separately reported cold vs warm in [`bench-results-live.json`](bench-results-live.json). Sequential baseline is the per-tile wall multiplied by N.
+Live numbers from the deployed Worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`). Numbers are warm (the auto-warm prewarm absorbs the cold-start path), separately reported cold vs warm in [`bench-results-live.json`](bench-results-live.json). Sequential baseline is the per-tile wall multiplied by N.
 
 | Size | Topology         | Parallel wall (warm) | Sequential | **Speedup** |
 |-----:|------------------|---------------------:|-----------:|------------:|
@@ -500,16 +519,16 @@ Every factory defaults `cacheKeyStrategy: 'stable'` — one isolate per fn shape
 
 ## Live demo
 
-[**cloudflare-parallel-demo.pages.dev**](https://cloudflare-parallel-demo.pages.dev) — every primitive, hand-on, with the same backend code that powers the prod-tests worker. CPU-bound throughout: SHA-256 chains, mandelbrot tiles, embeddings, raytracing.
+[**cloudflare-parallel.ashishkmr472.workers.dev**](https://cloudflare-parallel.ashishkmr472.workers.dev) — every primitive, hands-on, backed by a real deployed Cloudflare Worker. CPU-bound throughout: SHA-256 chains, mandelbrot tiles, embeddings, raytracing.
 
-The substrate test worker is also live at [`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev). Hit `/health` to verify; `/pool/map` to drive `pool.map` directly.
+The same Worker serves the static demo UI and the live primitive endpoints. Hit [`/health`](https://cloudflare-parallel.ashishkmr472.workers.dev/health) to verify; POST to `/pool/map` to drive `pool.map` directly.
 
 ## Compatibility
 
 | Requirement | Version |
 | --- | --- |
 | Wrangler | 3 or 4 |
-| `compatibility_date` | ≥ 2025-09-01 |
+| `compatibility_date` | ≥ 2026-01-20 |
 | Worker Loader binding | required (private beta) |
 | Bun | recommended for development |
 

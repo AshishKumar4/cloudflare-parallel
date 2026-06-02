@@ -13,9 +13,10 @@ args, the worker runs it in a sandboxed Worker Loader isolate.
   - `{ kind: 'auth', auth: hmacAuth({ secret }) }` — HMAC-signed body.
   - `{ kind: 'public' }` — explicit opt-in to an open endpoint (a
     one-time runtime warning is logged).
-- **Sandboxing.** `globalOutbound: null` removes the loaded isolate's
-  ability to make outbound `fetch()` calls. `policy.allowBindings: []`
-  exposes zero env bindings — submitted code sees only its args.
+- **Sandboxing.** `Parallel.vm` defaults submitted code to
+  `globalOutbound: null`; this example sets it explicitly for clarity.
+  `policy.allowBindings: []` exposes zero env bindings — submitted
+  code sees only its args.
 - **Capability gating per tenant.** Pass `allowBindings: ['KV_TENANT_A']`
   to expose only one tenant's KV namespace; library-internal `Cfp*`
   bindings are hard-blocklisted regardless.
@@ -43,7 +44,8 @@ curl -X POST 'http://localhost:8787/' \
 - This is the threat-modelled primitive at the heart of the library.
   Every other surface (`pool.handle`, `Parallel.VM`) composes on the
   same `submitCodeHandler` with the same policy contract.
-- Bearer auth (`bearerAuth`) is timing-safe via `crypto.subtle.digest`.
+- Bearer auth (`bearerAuth`) compares the full bearer header in
+  constant time.
 - Submitted code **cannot** access library-internal DO bindings even
   if you accidentally list them in `allowBindings`.
 - See `docs/security.md` for the full threat model.

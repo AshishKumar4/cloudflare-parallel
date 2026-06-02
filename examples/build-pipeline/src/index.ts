@@ -91,8 +91,8 @@ export default {
     }
     const files = Math.min(Number(url.searchParams.get('files') ?? 64), 1024);
     const pool = Parallel.pool(env, {
-      // Skip the DO hop for size-≤4 fan-outs. Loaded isolate is
-      // prewarmed automatically (autoWarm: true by default).
+      // Skip the DO hop for single-job dispatches. Fan-outs of size >= 2
+      // still route through leaf DOs for real CPU parallelism.
       inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
         | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
         | undefined,

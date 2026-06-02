@@ -1,4 +1,5 @@
 import type { JobStatus, RetryPolicy } from '../api/options';
+import type { RunOneRequest } from '../coordinator/protocol';
 
 export interface PersistedJob {
   id: string;
@@ -7,6 +8,10 @@ export interface PersistedJob {
   fnSource: string;
   args: unknown[];
   context?: Record<string, unknown>;
+  /** Wire-level worker options applied when this job is executed. */
+  workerOptions?: RunOneRequest['workerOptions'];
+  /** Bindings allow-list, intersected with the SchedulerDO's own env. */
+  allowList?: string[];
   meta?: Record<string, string>;
   createdAt: number;
   /** Absolute deadline epoch ms. */

@@ -6,6 +6,24 @@ versioning follows [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Source/docs reconciliation
+
+- Submitted-code paths (`pool.handle`, `submitCodeHandler`, `Parallel.vm`)
+  now sandbox outbound by default with `globalOutbound: null` unless the
+  original pool explicitly opted into a different outbound policy.
+- DO-backed `Pool`, `Actor`, and `Scheduler` paths now propagate binding
+  allow-lists derived from `bindings:`. `policy.allowBindings` is enforced
+  on production DO-backed submit-code paths, not just in testing fakes.
+- `Scheduler` now persists and applies per-job `workerOptions` and binding
+  allow-lists, and constructor-level `inFlightLimit`, `maxQueueDepth`,
+  `fairCapacityPerTenant`, and `resultRetention.ttlMs` are applied before
+  first use.
+- Unsupported Scheduler constructor fields (`store` other than
+  `'do-storage'`, `fairness.keyFrom`, and `alarmCadence`) now throw
+  `BindingError` instead of being silently ignored.
+- README, design, security, tuning, troubleshooting, examples, and demo
+  docs were reconciled against source behavior.
+
 ### Chore (quality audit + cleanup pass)
 
 A deep audit (see `/workspace/quality-audit-findings.md`) drove a
@@ -182,9 +200,8 @@ The fixes:
     auto-selector promotes to tree exactly when a single coordinator
     would otherwise exceed its outbound RPC fan-out budget. Override
     both knobs together to keep larger fan-outs flat.
-  - `PER_DO_LOADER_CAP = 4` constant deleted. `fillCapped` helper
-    deprecated (still exported for backward compat; no longer used by
-    the selector).
+  - `PER_DO_LOADER_CAP = 4` constant deleted. The selector no longer
+    uses cap-first leaf packing; fan-outs use one job per leaf DO.
 - **Coordinator dispatch** (`src/coordinator/coordinator.ts`):
   - `#dispatchInDo` is now a single-job path — refuses size > 1
     defensively (the selector should have rejected it first).
@@ -285,9 +302,9 @@ The fixes:
 - **`examples/vm` migrated off deprecated nested `pool: {}` shape**:
   pool options now live at the top level of the `Parallel.vm` opts,
   matching the v0.3 API.
-- **`fillCapped` exported from the public API**: symmetric with
-  `balancedFill`. Both helpers were referenced in the CHANGELOG and
-  the tests but only `balancedFill` was on the public surface.
+- **Removed stale `fillCapped` public-API references**: the current
+  public topology helper is `balancedFill`; the selector uses one job
+  per leaf DO and does not need cap-first packing.
 - **`CfpWorkerDOEntry` removed**: empty placeholder class that nothing
   referenced — implement-or-delete decision per the audit; deleted.
 
@@ -296,9 +313,10 @@ The fixes:
 - **`CfpInProcessCoordinator`** — a `WorkerEntrypoint` loopback target
   registered via `ctx.exports`. Pass
   `inProcess: ctx.exports.CfpInProcessCoordinator` to `Parallel.pool` to
-  skip the Coordinator DO hop for `submit()` and small fan-outs (size
-  ≤ 4). Per-call dispatch drops from tens of milliseconds to a couple
-  of milliseconds. ([Workers `ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/))
+  skip the Coordinator DO hop for `submit()` and `pool.map([x], fn)`.
+  Fan-outs of size >= 2 route through leaf DOs for CPU parallelism.
+  Per-call dispatch drops from tens of milliseconds to a couple of
+  milliseconds. ([Workers `ctx.exports` reference](https://developers.cloudflare.com/workers/runtime-apis/context/))
 - **Promise pipelining** at the leaf-DO tier. `CfpWorkerDO.openSession()`
   and `CfpSubCoord.openTreeSession()` return long-lived `RpcTarget`
   sessions; the coordinator chains the workload call on the
@@ -309,12 +327,10 @@ The fixes:
   region hint mapping for `namespace.get(id, { locationHint })` so
   freshly-created leaf DOs colocate with the request's incoming colo.
   ([Data location reference](https://developers.cloudflare.com/durable-objects/reference/data-location/))
-- **`fillCapped`** companion to `balancedFill` in `src/topology/plan.ts`.
-  `balancedFill` is now true even-distribution
-  (`floor(size/n)` base + 1-extra per remainder), used by the tree
-  topology for true F-way parallel fan-out. `fillCapped` keeps the
-  cap-first behaviour (fill-`maxPerSlot`-at-a-time, last slot remainder)
-  for hybrid leaf shapes.
+- **`balancedFill`** in `src/topology/plan.ts` is true
+  even-distribution (`floor(size/n)` base + 1-extra per remainder),
+  used by the tree topology for F-way parallel fan-out. Hybrid leaf
+  shape is one job per leaf DO: `[1, 1, ..., 1]`.
 - **Bundler-shim stripping** in `serializeFunction`. `__name(fn,
   "literal")` and `__publicField(target, "key", value)` wrappers
   emitted by esbuild's bundler runtime are now stripped at serialize
@@ -367,7 +383,7 @@ The fixes:
 - **`balancedFill` semantics.** Previously cap-first, which collapsed
   `balancedFill(N, F, N)` to `[N, 0, ..., 0]` — the tree topology
   was passing exactly that and degenerating to a chain. Now true even
-  distribution; the hybrid leaf shape uses `fillCapped` instead.
+  distribution; hybrid leaf shape is one job per leaf DO.
   (Surfaced in third-party review; the brokenness capped peak
   parallelism at 128 regardless of size.)
 - **`fanOutPerLevel`** in `PoolStats` now appends the per-leaf loader
@@ -459,5 +475,4 @@ Initial public release.
   in-memory ready set after backoff.
 - `bearerAuth` prefers `crypto.subtle.timingSafeEqual` when available;
   falls back to a hand-rolled XOR-OR loop.
-
 

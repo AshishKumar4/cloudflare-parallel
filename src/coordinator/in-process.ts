@@ -125,6 +125,7 @@ export class CfpInProcessCoordinator extends WorkerEntrypoint<InProcessCoordinat
         request.workerOptions,
         this.env as unknown as Record<string, unknown>,
       ),
+      allowList: request.allowList,
     });
     try {
       const value = await runner.runOne({

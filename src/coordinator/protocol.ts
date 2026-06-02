@@ -75,6 +75,8 @@ export interface RunBatchRequest {
   context?: Record<string, unknown>;
   workerOptions?: RunOneRequest['workerOptions'];
   cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
+  /** Bindings allow-list, intersected with the receiving DO's own env. */
+  allowList?: string[];
   /** Each entry is the args tuple for one leaf-isolate dispatch. */
   argsList: unknown[][];
   envelope: DispatchEnvelope;
@@ -125,6 +127,8 @@ export interface DispatchTreeRequest {
   context?: Record<string, unknown>;
   workerOptions?: RunOneRequest['workerOptions'];
   cacheKeyStrategy?: 'stable' | 'fresh' | 'auto';
+  /** Bindings allow-list, intersected with each receiving DO's own env. */
+  allowList?: string[];
   /** Args for THIS slice, in caller-original index order. */
   argsList: unknown[][];
   /** Plan slice — directly delegated. Children are HybridPlan or sub-trees. */

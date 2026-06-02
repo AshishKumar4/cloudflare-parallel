@@ -77,7 +77,8 @@ export default {
     const query = body.query ?? 'cloudflare workers';
 
     const pool = Parallel.pool(env, {
-      // Skip the DO hop for size-≤4 fan-outs (e.g. the query embed below).
+      // Skip the DO hop for single-job dispatches (e.g. the query embed
+      // below). Document fan-outs still route through leaf DOs.
       inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
         | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
         | undefined,

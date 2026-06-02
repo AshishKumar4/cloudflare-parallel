@@ -17,7 +17,8 @@ import type { SubmitOptions } from './options';
  *   2. **Capability escalation via env.** Only bindings on
  *      `policy.allowBindings` reach the dynamic worker's `env`. Default
  *      `allowBindings = []` — submitted code sees no user bindings unless
- *      explicitly enumerated. See `Pool.restrictTo` in pool.ts.
+ *      explicitly enumerated. See `Pool.restrictForSubmittedCode` in
+ *      pool.ts.
  *   3. **Fan-out amplification.** Submissions go through a single
  *      `pool.submit` (size=1). To prevent submitted code from spinning
  *      up ITS OWN pool from inside the loaded isolate, library-internal
@@ -185,9 +186,17 @@ export function submitCodeHandler<B extends Record<string, unknown>>(
     // Capability gate: rebuild the pool with only the allow-listed
     // bindings visible. Default `allowBindings = []` means submitted
     // code sees NO user bindings unless the policy explicitly
-    // enumerates them. `Pool.restrictTo` re-uses the same coordinator;
-    // only the bindings filter is rebuilt.
-    const restrictedPool = opts.pool.restrictTo(policy.allowBindings ?? []);
+    // enumerates them. `Pool.restrictForSubmittedCode` re-uses the same
+    // coordinator, rebuilds the binding allow-list, and defaults the
+    // submitted-code worker to globalOutbound:null unless the original pool
+    // explicitly opted into a different outbound policy.
+    const poolWithSubmittedCodeDefaults = opts.pool as Pool<B, Record<string, unknown>> & {
+      restrictForSubmittedCode?: (allow: ReadonlyArray<string>) => Pool<B, Record<string, unknown>>;
+    };
+    const restrictedPool =
+      typeof poolWithSubmittedCodeDefaults.restrictForSubmittedCode === 'function'
+        ? poolWithSubmittedCodeDefaults.restrictForSubmittedCode(policy.allowBindings ?? [])
+        : opts.pool.restrictTo(policy.allowBindings ?? []);
 
     try {
       // The submitted source is shipped to the loader directly — the

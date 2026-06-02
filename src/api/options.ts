@@ -66,7 +66,7 @@ export interface WorkerCodeOptions {
   compatibilityDate?: string;
   /** Additional compatibility flags for the loaded isolate. */
   compatibilityFlags?: string[];
-  /** `null` = sandboxed (default), `undefined` = inherit, `ServiceStub` = redirect. */
+  /** `null` = sandboxed, `undefined`/omitted = inherit, `ServiceStub` = redirect. */
   globalOutbound?: ServiceStub | null;
   /** Per-isolate runtime caps (cpuMs, subrequests, etc). */
   limits?: WorkerCodeLimits;
@@ -184,7 +184,12 @@ export interface SchedulerEvent {
  *    statements in the loaded source. JSON-canonicalizable only.
  */
 export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unknown>> {
-  /** User bindings forwarded into the loaded isolate's `env`. */
+  /**
+   * User binding declaration. On DO-backed paths the values must also be
+   * present on the receiving DO's env; these keys become the allow-list
+   * forwarded into loaded isolates. If omitted, all safe env keys are
+   * forwarded after the library-internal blocklist.
+   */
   bindings?: B;
   /** Module-scope constants embedded into the loaded source. JSON-only. */
   context?: C;
@@ -194,7 +199,7 @@ export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unk
   retries?: number;
   /** Initial retry backoff in ms; jittered ±25%. Default 100. */
   retryDelay?: number;
-  /** `null` (default) = sandboxed, `undefined` = inherit caller's outbound, `ServiceStub` = proxy. */
+  /** `null` = sandboxed, omitted/`undefined` = inherit caller outbound, `ServiceStub` = proxy. */
   globalOutbound?: ServiceStub | null;
   /** Per-isolate `cpuMs` / `subRequests` caps. */
   limits?: WorkerCodeLimits;
@@ -276,7 +281,7 @@ export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unk
  * runtime; use {@link PoolOptions} for higher fan-out.
  */
 export interface LoaderOnlyOptions<B = Record<string, unknown>, C = Record<string, unknown>> {
-  /** User bindings forwarded into the loaded isolate's `env`. */
+  /** User bindings forwarded directly into the loaded isolate's `env`. */
   bindings?: B;
   /** Module-scope context. JSON-canonicalizable only. */
   context?: C;
@@ -286,7 +291,7 @@ export interface LoaderOnlyOptions<B = Record<string, unknown>, C = Record<strin
   retries?: number;
   /** Initial retry backoff in ms. */
   retryDelay?: number;
-  /** `null` = sandboxed (default), `undefined` = inherit. */
+  /** `null`/omitted = sandboxed, `undefined` inside `workerOptions` = inherit. */
   globalOutbound?: ServiceStub | null;
   /** Per-isolate runtime caps. */
   limits?: WorkerCodeLimits;
@@ -335,6 +340,12 @@ export interface RetryPolicy {
  * without inheriting fan-out tuning that doesn't apply to the scheduler.
  */
 export interface WorkerSharedOptions<B = Record<string, unknown>, C = Record<string, unknown>> {
+  /**
+   * DO-backed binding declaration. Values must also exist on the receiving
+   * DO's env; these keys become the allow-list forwarded into loaded
+   * isolates. If omitted, all safe env keys are forwarded after internal
+   * blocklists.
+   */
   bindings?: B;
   context?: C;
   timeout?: number;
@@ -368,12 +379,18 @@ export interface SchedulerOptions<
   /** Stable Scheduler id (also the SchedulerDO instance key). Required. */
   id: string;
   /**
-   * JobStore backend. Default `'do-storage'` (canonical, transactional).
-   * `'queues'` and `'d1'` are opt-in adapter names; pass a `JobStore`
-   * implementation directly for custom backends.
+   * JobStore backend. The public Scheduler currently supports only
+   * `'do-storage'`/omitted. D1 and Queues adapters exist as lower-level
+   * `JobStore` implementations, but cannot be selected through this
+   * constructor because custom stores cannot be passed into a remote
+   * SchedulerDO over RPC.
    */
   store?: 'do-storage' | 'queues' | 'd1' | JobStore;
-  /** Per-tenant fairness key + capacity for round-robin dispatch. */
+  /**
+   * Reserved. The public Scheduler uses `job.tenantId` as the fairness
+   * key and `fairCapacityPerTenant` as the capacity. Passing this field
+   * throws instead of being silently ignored.
+   */
   fairness?: { keyFrom: (job: Job<unknown[], unknown>) => string; capacityPerKey: number };
   /** Retry policy applied to jobs that don't carry their own. */
   retry?: RetryPolicy;
@@ -381,7 +398,7 @@ export interface SchedulerOptions<
   deadline?: { defaultMs: number };
   /** How long `done` results linger before sweep. After this, `result()` throws `ResultExpiredError`. */
   resultRetention?: { ttlMs: number };
-  /** Backstop alarm cadence (retry + result-TTL sweep + expired-lease reclaim). */
+  /** Reserved. Alarm cadence is fixed inside SchedulerDO; passing this field throws. */
   alarmCadence?: { activeMs: number; idleMs: number };
   /** Max concurrent jobs in dispatch (default 32). */
   inFlightLimit?: number;
@@ -392,9 +409,10 @@ export interface SchedulerOptions<
 }
 
 /**
- * VM options. `VMOptions<B>` extends `PoolOptions<B>` directly so all
- * pool tuning knobs (topology, autoWarm, cacheKeyStrategy, etc.) are
- * accepted at the top level. A handful of fields are kept as
+ * VM options. `VMOptions<B>` extends `PoolOptions<B>` directly so dispatch
+ * knobs (`timeout`, `cacheKeyStrategy`, `bindings`, `globalOutbound`, etc.)
+ * are accepted at the top level. Fan-out topology knobs have no practical
+ * effect on the single submitted-code call. A handful of fields are kept as
  * `@deprecated` aliases for the earlier nested `pool: PoolOptions<B>`
  * shape — slated for removal in the next major.
  */

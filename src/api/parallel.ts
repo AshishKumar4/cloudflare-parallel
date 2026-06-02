@@ -81,9 +81,9 @@ export const Parallel = {
 
   /**
    * Heterogeneous job scheduler with retries / deadlines / fair-queueing
-   * / per-tenant cancellation. Persistent (`do-storage` default; opt-in
-   * `queues` / `d1` / custom `JobStore`). Reactive dispatch — no
-   * alarm-batched delay. Requires `CfpSchedulerDO` binding.
+   * / per-tenant cancellation. Persistent via the SchedulerDO SQLite
+   * store. Reactive dispatch — no alarm-batched delay. Requires
+   * `CfpSchedulerDO` binding.
    */
   scheduler<
     B extends Record<string, unknown> = Record<string, unknown>,
@@ -93,10 +93,10 @@ export const Parallel = {
   },
 
   /**
-   * Build an HTTP submit-code surface. Equivalent to
-   * `Parallel.pool(env, opts.pool).handle({ policy: opts.policy })`.
-   * `policy` is required — the library refuses to expose a default open
-   * endpoint.
+   * Build an HTTP submit-code surface. Equivalent to constructing a Pool
+   * and routing through `submitCodeHandler`. `policy` is required, and
+   * submitted code defaults to `globalOutbound: null` unless the pool
+   * explicitly opts into a different outbound policy.
    */
   vm<B extends Record<string, unknown> = Record<string, unknown>>(
     env: PoolEnv,

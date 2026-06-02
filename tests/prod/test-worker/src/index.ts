@@ -64,9 +64,9 @@ interface CtxWithExports extends ExecutionContext {
   };
 }
 
-// CORS: the demo site (cloudflare-parallel-demo.pages.dev) calls this
-// worker cross-origin. Allow any origin; the surface is read-only +
-// auth-gated where it matters.
+// CORS stays permissive so local demo builds and remote E2E probes can
+// call this Worker directly. The production demo is served from the
+// same Worker via static assets.
 const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
@@ -256,8 +256,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     }
 
     // ---- Scheduler ----
+    const schedulerId = 'cloudflare-parallel';
     const scheduler = Parallel.scheduler(env, {
-      id: 'prod-tests',
+      id: schedulerId,
       retry: { max: 3, backoff: 'exponential', baseMs: 100 },
       deadline: { defaultMs: 30_000 },
       resultRetention: { ttlMs: 600_000 },
@@ -280,7 +281,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       if (!id) return new Response('?id= required', { status: 400 });
       // Re-derive a handle from the SchedulerDO directly (handles aren't
       // serializable across requests).
-      const stub = env.CfpSchedulerDO.get(env.CfpSchedulerDO.idFromName('prod-tests'));
+      const stub = env.CfpSchedulerDO.get(env.CfpSchedulerDO.idFromName(schedulerId));
       const r = await (stub as unknown as { result: (id: string) => Promise<unknown> }).result(id);
       return Response.json(r);
     }

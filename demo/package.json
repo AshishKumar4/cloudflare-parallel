@@ -1,11 +1,11 @@
 {
-  "name": "cloudflare-parallel-demo",
+  "name": "cloudflare-parallel-demo-assets",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json && cp ../bench-results-live.json public/bench-results-live.json",
     "dev": "tsc -p tsconfig.json --watch",
-    "deploy": "npm run build && wrangler pages deploy public --project-name=cloudflare-parallel-demo --commit-dirty=true"
+    "deploy": "npm run build && ../tests/prod/test-worker/refresh-pkg.sh && ../node_modules/.bin/wrangler deploy --config ../tests/prod/test-worker/wrangler.toml"
   },
   "devDependencies": {
     "typescript": "^5.5.0",

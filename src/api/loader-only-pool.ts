@@ -69,6 +69,11 @@ export class LoaderOnlyPoolImpl<
           'Add `[[worker_loaders]]\\nbinding = "LOADER"` to wrangler.toml.',
       );
     }
+    const hasTopLevelGlobalOutbound = Object.prototype.hasOwnProperty.call(opts, 'globalOutbound');
+    const hasWorkerGlobalOutbound = Boolean(
+      opts.workerOptions &&
+      Object.prototype.hasOwnProperty.call(opts.workerOptions, 'globalOutbound'),
+    );
     this.#opts = opts;
     this.#runner = new LoaderRunner({
       loader: env.LOADER,
@@ -76,12 +81,11 @@ export class LoaderOnlyPoolImpl<
       cacheKeyStrategy: opts.cacheKeyStrategy ?? 'stable',
       workerOptions: {
         ...opts.workerOptions,
-        globalOutbound:
-          opts.globalOutbound !== undefined
-            ? opts.globalOutbound
-            : opts.workerOptions?.globalOutbound !== undefined
-              ? opts.workerOptions.globalOutbound
-              : null,
+        globalOutbound: hasTopLevelGlobalOutbound
+          ? opts.globalOutbound
+          : hasWorkerGlobalOutbound
+            ? opts.workerOptions!.globalOutbound
+            : null,
         limits: opts.limits ?? opts.workerOptions?.limits,
       },
     });

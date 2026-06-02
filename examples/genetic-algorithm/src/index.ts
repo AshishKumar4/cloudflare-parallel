@@ -80,7 +80,8 @@ export default {
     const cities = Math.min(Number(url.searchParams.get('cities') ?? 50), 200);
 
     const pool = Parallel.pool(env, {
-      // Loopback for size-≤4 fan-outs; prewarmed loaded isolate.
+      // Loopback for single-job dispatches; fan-outs of size >= 2 still
+      // use leaf DOs for CPU parallelism.
       inProcess: (ctx as CtxWithExports).exports?.CfpInProcessCoordinator as
         | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
         | undefined,

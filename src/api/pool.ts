@@ -40,7 +40,7 @@ import { emitObservabilityEvent } from '../observability/index';
 import { assertNoLibraryInternalBindings } from '../loader/sandbox';
 import { leafErrorToTypedError } from './error-decode';
 import { submitCodeHandler, type SubmitCodePolicy } from './submit-code-handler';
-import { pickBindings } from './bindings';
+import { bindingAllowList, pickBindings } from './bindings';
 
 const DEFAULT_COORDINATOR_NAME = 'cfp:default';
 
@@ -194,15 +194,17 @@ export interface PipeFn {
  * User fns observe `env.signal.aborted` synchronously; pending awaits
  * reject with `signal.reason`.
  *
- * **Topology selection.** `submit` always uses in-DO. `map` / `scatter`
- * / `reduce` / `pmap` auto-select between in-DO (≤4 items), hybrid
- * (≤16), and tree (recursive sub-coordinators). See
+ * **Topology selection.** `submit` always uses the single-job path.
+ * `map` / `scatter` / `reduce` / `pmap` auto-select between in-DO
+ * (0..1 items), hybrid (2..`maxFanOut`, default 32), and tree
+ * (recursive sub-coordinators). See
  * {@link PoolStats.topology}.
  *
- * **Bindings.** Pass `bindings:` at construction. They are forwarded to
- * the loaded isolate's `env`. Library-internal DO bindings
- * (`CfpCoordinator`, `CfpWorkerDO`, etc.) are hard-blocklisted from
- * forwarding regardless of what the user passes.
+ * **Bindings.** Pass `bindings:` at construction to declare which env
+ * keys may reach the loaded isolate. On DO-backed paths the receiving
+ * DO resolves those keys from its own env; `bindings:` is the allow-list.
+ * Library-internal DO bindings (`CfpCoordinator`, `CfpWorkerDO`, etc.)
+ * are hard-blocklisted from forwarding regardless of what the user passes.
  *
  * @typeParam B user-bindings shape (e.g. `{ AI: Ai; KV: KVNamespace }`).
  * @typeParam C reserved for context-shape generic.
@@ -363,6 +365,7 @@ export class Pool<
           limits: this.#opts.limits ?? this.#opts.workerOptions?.limits,
           tailBindingName: this.#opts.observability?.tail?.bindingName,
         }),
+        allowList: this.#bindingAllowList(),
         envelope,
       });
     } catch {
@@ -460,6 +463,16 @@ export class Pool<
       branchingFactor: this.#opts.branchingFactor,
       treeThreshold: this.#opts.treeThreshold,
     };
+  }
+
+  #bindingAllowList(): string[] | undefined {
+    return bindingAllowList(this.#opts.bindings as Record<string, unknown> | undefined);
+  }
+
+  #hasExplicitGlobalOutbound(): boolean {
+    if (Object.prototype.hasOwnProperty.call(this.#opts, 'globalOutbound')) return true;
+    const worker = this.#opts.workerOptions;
+    return Boolean(worker && Object.prototype.hasOwnProperty.call(worker, 'globalOutbound'));
   }
 
   // ---- single-shot submit -------------------------------------------
@@ -590,7 +603,7 @@ export class Pool<
             // distinct slots produce distinct isolates (see
             // `src/loader/cache-key.ts` for the full rationale).
             taskSlot: 0,
-            allowList: undefined,
+            allowList: this.#bindingAllowList(),
             cancelStream: cancelWriter?.stream,
           }),
         {
@@ -1109,6 +1122,26 @@ export class Pool<
     });
   }
 
+  /**
+   * Internal variant used by `submitCodeHandler`. Submitted-code endpoints
+   * are capability-restricted like `restrictTo`, and default to
+   * `globalOutbound: null` unless the original pool explicitly opted into
+   * an outbound policy.
+   *
+   * @internal
+   */
+  restrictForSubmittedCode(allow: ReadonlyArray<string>): Pool<B, C> {
+    const src = (this.#opts.bindings ?? {}) as Record<string, unknown>;
+    const next: PoolOptions<B, C> = {
+      ...this.#opts,
+      bindings: pickBindings(src, allow as ReadonlyArray<string & keyof typeof src>) as B,
+    };
+    if (!this.#hasExplicitGlobalOutbound()) {
+      next.globalOutbound = null;
+    }
+    return new Pool<B, C>(this.#env, next);
+  }
+
   // ---- fan-out shared --------------------------------------------------
 
   async #fanOut<TRes>(
@@ -1135,8 +1168,8 @@ export class Pool<
       }
     }
 
-    // Pick dispatch target. Small-N (≤4) routes through the in-process
-    // loopback when wired up; larger fan-outs use the Coordinator DO.
+    // Pick dispatch target. Size=1 can route through the in-process
+    // loopback when wired up; fan-outs of size >= 2 use the Coordinator DO.
     const target = this.#runManyTarget(argsList.length);
     // Fire prewarm in parallel with the real dispatch. Validated 14×–140×
     // cold-path speedup; cost is zero (parallelized, deduped).
@@ -1165,6 +1198,7 @@ export class Pool<
             envelope,
             freshIsolate: opts.perCall?.freshIsolate,
             selector: this.#selector(),
+            allowList: this.#bindingAllowList(),
             cancelStream: cancelWriter?.stream,
             locationHint: this.#locationHint,
           }),

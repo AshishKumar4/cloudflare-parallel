@@ -1,5 +1,5 @@
 {
-  "name": "cloudflare-parallel-prod-tests-worker",
+  "name": "cloudflare-parallel-worker",
   "private": true,
   "type": "module",
   "scripts": {

@@ -22,6 +22,8 @@ export class D1JobStore implements JobStore {
         fn_source TEXT NOT NULL,
         args TEXT NOT NULL,
         context TEXT,
+        worker_options TEXT,
+        allow_list TEXT,
         meta TEXT,
         created_at INTEGER NOT NULL,
         deadline_ms INTEGER NOT NULL,
@@ -46,6 +48,16 @@ export class D1JobStore implements JobStore {
     } catch {
       // Column already exists; fine.
     }
+    try {
+      await this.#db.exec(`ALTER TABLE cfp_jobs ADD COLUMN worker_options TEXT`);
+    } catch {
+      // Column already exists; fine.
+    }
+    try {
+      await this.#db.exec(`ALTER TABLE cfp_jobs ADD COLUMN allow_list TEXT`);
+    } catch {
+      // Column already exists; fine.
+    }
   }
 
   async enqueue(job: PersistedJob): Promise<void> {
@@ -53,10 +65,10 @@ export class D1JobStore implements JobStore {
       await this.#db
         .prepare(
           `INSERT INTO cfp_jobs (
-            id, tenant_id, fn_hash, fn_source, args, context, meta,
+            id, tenant_id, fn_hash, fn_source, args, context, worker_options, allow_list, meta,
             created_at, deadline_ms, retry_max, retry_count, retry_base_ms, retry_backoff,
             status, idempotency_key, cache_key_strategy
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
         )
         .bind(
           job.id,
@@ -65,6 +77,8 @@ export class D1JobStore implements JobStore {
           job.fnSource,
           JSON.stringify(job.args),
           job.context ? JSON.stringify(job.context) : null,
+          job.workerOptions ? JSON.stringify(job.workerOptions) : null,
+          job.allowList ? JSON.stringify(job.allowList) : null,
           job.meta ? JSON.stringify(job.meta) : null,
           job.createdAt,
           job.deadlineEpochMs,
@@ -298,6 +312,8 @@ interface D1Row {
   fn_source: string;
   args: string;
   context: string | null;
+  worker_options?: string | null;
+  allow_list?: string | null;
   meta: string | null;
   created_at: number;
   deadline_ms: number;
@@ -323,6 +339,10 @@ function rowToJob(row: D1Row): PersistedJob {
     fnSource: row.fn_source,
     args: JSON.parse(row.args),
     context: row.context ? JSON.parse(row.context) : undefined,
+    workerOptions: row.worker_options
+      ? (JSON.parse(row.worker_options) as PersistedJob['workerOptions'])
+      : undefined,
+    allowList: row.allow_list ? (JSON.parse(row.allow_list) as string[]) : undefined,
     meta: row.meta ? JSON.parse(row.meta) : undefined,
     createdAt: row.created_at,
     deadlineEpochMs: row.deadline_ms,

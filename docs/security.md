@@ -25,8 +25,8 @@ contract:
 
 ```ts
 type SubmitCodePolicy<B> =
-  | { kind: 'auth'; auth: (req: Request) => Promise<boolean>; allowBindings?: string[]; maxBytes?: number }
-  | { kind: 'public'; allowBindings?: string[]; maxBytes?: number };
+  | { kind: 'auth'; auth: (req: Request) => boolean | Promise<boolean>; allowBindings?: string[]; maxBytes?: number; maxFnSourceBytes?: number }
+  | { kind: 'public'; allowBindings?: string[]; maxBytes?: number; maxFnSourceBytes?: number };
 ```
 
 `{ kind: 'public' }` is an explicit opt-in; the runtime logs a
@@ -34,10 +34,13 @@ one-time console.warn so deployments cannot silently expose an open
 endpoint.
 
 Built-in `auth`:
-- `bearerAuth(token)` — bearer token gate. Token is hashed via
-  `crypto.subtle.digest`; comparison is timing-safe via `crypto.timingSafeEqual`-equivalent on the digests. ≥16-character minimum.
-- `hmacAuth({ secret })` — HMAC-SHA256 signed bodies. Header
-  `x-cfp-signature: hex`; signature covers raw body bytes.
+- `bearerAuth(token)` — expects `Authorization: Bearer <token>` and
+  compares the full header string in constant time. Minimum token length
+  is 16 characters.
+- `hmacAuth({ secret })` — verifies HMAC-SHA-256 over
+  `${timestamp}\n${bodyText}` where `bodyText` is read from
+  `req.clone().text()`. Headers default to `x-cfp-signature` and
+  `x-cfp-timestamp`; signatures may be hex or base64.
 
 Test coverage: `tests/unit/submit-code-handler.test.ts` (13 tests).
 
@@ -47,28 +50,40 @@ The user can pass `bindings: { ... }` to construct a Pool. The
 library's own DO bindings (`CfpCoordinator`, `CfpWorkerDO`,
 `CfpSubCoord`, `CfpSchedulerDO`) are **hard-blocklisted** from
 forwarding to loaded isolates regardless of what the user passes.
-Source: `src/api/submit-code-handler.ts` reserved-prefix check (any
-key starting with `Cfp` or `cfp`).
+Source: `src/loader/sandbox.ts` blocks `^Cfp[A-Z]`, lowercase `^cfp`,
+and the non-cloneable `LOADER` binding.
 
 Additionally, `policy.allowBindings: string[]` filters the pool's
-bindings to only the named keys before dispatch. Default is `[]` —
-zero exposure.
+bindings declaration to only the named keys before dispatch. Default is
+`[]` — zero exposure. On DO-backed paths, binding values are resolved
+from the receiving DO's env; the allow-list controls which env keys may
+cross into the loaded isolate.
 
 ### T3: Outbound exfiltration
 
-`pool.globalOutbound: null` (default for `Parallel.vm`) sandboxes the
-loaded isolate's outbound fetch. The isolate cannot reach
-`example.com:443` from inside the user fn.
+`submitCodeHandler` and `Parallel.vm` default submitted-code workers to
+`globalOutbound: null` unless the original pool explicitly configured a
+different outbound policy. That blocks outbound `fetch()` / `connect()`
+from inside the user fn.
 
 If you need outbound access, set `globalOutbound: env.MY_OUTBOUND_SERVICE` —
 a Service binding that proxies allowed destinations. Library does not
 ship a default URL allowlist.
 
+Normal trusted `Parallel.pool`, `Parallel.actor`, and
+`Parallel.scheduler` jobs inherit outbound access unless you set
+`globalOutbound: null`. `Parallel.loaderOnly` defaults to sandboxed
+outbound unless you explicitly opt into inherit through
+`workerOptions.globalOutbound`.
+
 ### T4: Resource amplification
 
-`policy.maxBytes` caps the request body at construction (default 1 MiB
-in `Parallel.vm`, configurable). Submitted fns are bounded by the
-runtime's per-request `cpuMs` and `subRequests` limits.
+`policy.maxBytes` caps the request body (default 64 KiB). The default
+parser also enforces `policy.maxFnSourceBytes` (default 64 KiB) on the
+function source string. Custom `parse` hooks are responsible for their
+own body-size enforcement after the initial `Content-Length` pre-check.
+Submitted fns are bounded by the runtime's per-request `cpuMs` and
+`subRequests` limits.
 
 For fan-out from inside a submitted fn: the loaded isolate has no
 direct DO bindings (capability-gated), so it cannot recursively
