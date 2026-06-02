@@ -96,15 +96,15 @@ budget × 128 leaf DOs ≈ 64 minutes of compute available within a single
 The deployed Worker
 ([`cloudflare-parallel.ashishkmr472.workers.dev`](https://cloudflare-parallel.ashishkmr472.workers.dev))
 runs the same Mandelbrot CPU bench at every topology size. Current
-checked-in numbers are from `2026-06-02T21:44:04.046Z` in
+checked-in numbers are from `2026-06-02T22:15:03.212Z` in
 [`bench-results-live.json`](../bench-results-live.json):
 
 ```
-size=4    hybrid (4 leaves)        speedup ≈ 1.3×
-size=16   hybrid (16 leaves)       speedup ≈ 3.7×
-size=64   tree [8,8]               speedup ≈ 13.3×
-size=128  tree [8,16]              speedup ≈ 20.6×
-size=256  tree [8,32]              speedup ≈ 37.5×
+size=4    hybrid (4 leaves)        speedup ≈ 3.0×
+size=16   hybrid (16 leaves)       speedup ≈ 7.1×
+size=64   tree [8,8]               speedup ≈ 19.5×
+size=128  tree [8,16]              speedup ≈ 50.7×
+size=256  tree [8,32]              speedup ≈ 75.4×
 ```
 
 These are fixed-cost Mandelbrot tile numbers from the live edge. Small

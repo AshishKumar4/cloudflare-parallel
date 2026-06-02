@@ -1,9 +1,9 @@
 {
   "target": "https://cloudflare-parallel.ashishkmr472.workers.dev",
-  "ts": "2026-06-02T21:44:04.046Z",
+  "ts": "2026-06-02T22:15:03.212Z",
   "methodology": {
-    "warmupRuns": 2,
-    "samples": 3,
+    "warmupRuns": 3,
+    "samples": 9,
     "coldDefinition": "first measured run after warmup — captures any per-call dispatch cost not amortized by warmup",
     "warmDefinition": "median of remaining samples after the cold run — steady-state throughput",
     "sequentialDefinition": "per-task wall-clock from a single inline run (sequential-sample mode), multiplied by N",
@@ -28,17 +28,23 @@
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 613,
+      "parallelColdMs": 612,
       "parallelWarmRuns": [
-        663,
-        2219
+        2501,
+        2529,
+        1694,
+        640,
+        623,
+        619,
+        673,
+        622
       ],
-      "parallelWarmMs": 1441,
-      "parallelOverallMedianMs": 663,
-      "sequentialExtrapolatedMs": 1918,
-      "speedup": 1.33,
-      "speedupColdParallel": 3.13,
-      "perTaskSampleMs": 479.5
+      "parallelWarmMs": 657,
+      "parallelOverallMedianMs": 640,
+      "sequentialExtrapolatedMs": 1953,
+      "speedup": 2.97,
+      "speedupColdParallel": 3.19,
+      "perTaskSampleMs": 488.25
     },
     {
       "workload": "mandelbrot",
@@ -48,17 +54,23 @@
       "fanOutPerLevel": [
         16
       ],
-      "parallelColdMs": 1757,
+      "parallelColdMs": 768,
       "parallelWarmRuns": [
-        1743,
-        2555
+        2788,
+        3581,
+        2139,
+        1414,
+        638,
+        665,
+        724,
+        663
       ],
-      "parallelWarmMs": 2149,
-      "parallelOverallMedianMs": 1757,
-      "sequentialExtrapolatedMs": 7846,
-      "speedup": 3.65,
-      "speedupColdParallel": 4.47,
-      "perTaskSampleMs": 490.375
+      "parallelWarmMs": 1069,
+      "parallelOverallMedianMs": 768,
+      "sequentialExtrapolatedMs": 7578,
+      "speedup": 7.09,
+      "speedupColdParallel": 9.87,
+      "perTaskSampleMs": 473.625
     },
     {
       "workload": "mandelbrot",
@@ -69,17 +81,23 @@
         8,
         8
       ],
-      "parallelColdMs": 2117,
+      "parallelColdMs": 789,
       "parallelWarmRuns": [
-        1866,
-        2951
+        3077,
+        3196,
+        1764,
+        2680,
+        1393,
+        856,
+        980,
+        721
       ],
-      "parallelWarmMs": 2409,
-      "parallelOverallMedianMs": 2117,
-      "sequentialExtrapolatedMs": 32096,
-      "speedup": 13.32,
-      "speedupColdParallel": 15.16,
-      "perTaskSampleMs": 501.5
+      "parallelWarmMs": 1579,
+      "parallelOverallMedianMs": 1393,
+      "sequentialExtrapolatedMs": 30760,
+      "speedup": 19.48,
+      "speedupColdParallel": 38.99,
+      "perTaskSampleMs": 480.625
     },
     {
       "workload": "mandelbrot",
@@ -90,17 +108,23 @@
         8,
         16
       ],
-      "parallelColdMs": 1980,
+      "parallelColdMs": 1706,
       "parallelWarmRuns": [
-        1830,
-        4120
+        1547,
+        1315,
+        1297,
+        1209,
+        1094,
+        1110,
+        1185,
+        1121
       ],
-      "parallelWarmMs": 2975,
-      "parallelOverallMedianMs": 1980,
-      "sequentialExtrapolatedMs": 61136,
-      "speedup": 20.55,
-      "speedupColdParallel": 30.88,
-      "perTaskSampleMs": 477.625
+      "parallelWarmMs": 1197,
+      "parallelOverallMedianMs": 1209,
+      "sequentialExtrapolatedMs": 60640,
+      "speedup": 50.66,
+      "speedupColdParallel": 35.55,
+      "perTaskSampleMs": 473.75
     },
     {
       "workload": "mandelbrot",
@@ -111,17 +135,23 @@
         8,
         32
       ],
-      "parallelColdMs": 2637,
+      "parallelColdMs": 2307,
       "parallelWarmRuns": [
-        2919,
-        3732
+        1267,
+        2271,
+        2375,
+        1767,
+        1773,
+        1435,
+        1414,
+        1465
       ],
-      "parallelWarmMs": 3326,
-      "parallelOverallMedianMs": 2919,
-      "sequentialExtrapolatedMs": 124864,
-      "speedup": 37.54,
-      "speedupColdParallel": 47.35,
-      "perTaskSampleMs": 487.75
+      "parallelWarmMs": 1616,
+      "parallelOverallMedianMs": 1767,
+      "sequentialExtrapolatedMs": 121856,
+      "speedup": 75.41,
+      "speedupColdParallel": 52.82,
+      "perTaskSampleMs": 476
     }
   ]
 }

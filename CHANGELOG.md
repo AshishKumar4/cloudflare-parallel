@@ -130,14 +130,14 @@ curve is:
 
 | N | Topology | Warm parallel | Sequential estimate | Speedup |
 |---:|---|---:|---:|---:|
-| 4 | hybrid | 1441 ms | 1.9 s | **1.3×** |
-| 16 | hybrid | 2149 ms | 7.8 s | **3.7×** |
-| 64 | tree `[8,8]` | 2409 ms | 32.1 s | **13.3×** |
-| 128 | tree `[8,16]` | 2975 ms | 61.1 s | **20.6×** |
-| 256 | tree `[8,32]` | 3326 ms | 124.9 s | **37.5×** |
+| 4 | hybrid | 657 ms | 2.0 s | **3.0×** |
+| 16 | hybrid | 1069 ms | 7.6 s | **7.1×** |
+| 64 | tree `[8,8]` | 1579 ms | 30.8 s | **19.5×** |
+| 128 | tree `[8,16]` | 1197 ms | 60.6 s | **50.7×** |
+| 256 | tree `[8,32]` | 1616 ms | 121.9 s | **75.4×** |
 
 Mandelbrot fixed-cost workload, live Worker run from
-`2026-06-02T21:44:04.046Z` with WARMUP_RUNS=2 and SAMPLES=3.
+`2026-06-02T22:15:03.212Z` with WARMUP_RUNS=3 and SAMPLES=9.
 
 The fixes:
 

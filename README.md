@@ -477,13 +477,13 @@ Live numbers from the deployed Worker (Mandelbrot tile workload, heavy intensity
 
 | Size | Topology         | Parallel wall (warm) | Sequential | **Speedup** |
 |-----:|------------------|---------------------:|-----------:|------------:|
-|    4 | `hybrid`         |              1441 ms |    1.9 s   |    **1.3×** |
-|   16 | `hybrid`         |              2149 ms |    7.8 s   |    **3.7×** |
-|   64 | `tree` `[8,8]`   |              2409 ms |   32.1 s   |   **13.3×** |
-|  128 | `tree` `[8,16]`  |              2975 ms |   61.1 s   |   **20.6×** |
-|  256 | `tree` `[8,32]`  |              3326 ms |  124.9 s   |   **37.5×** |
+|    4 | `hybrid`         |               657 ms |    2.0 s   |    **3.0×** |
+|   16 | `hybrid`         |              1069 ms |    7.6 s   |    **7.1×** |
+|   64 | `tree` `[8,8]`   |              1579 ms |   30.8 s   |   **19.5×** |
+|  128 | `tree` `[8,16]`  |              1197 ms |   60.6 s   |   **50.7×** |
+|  256 | `tree` `[8,32]`  |              1616 ms |  121.9 s   |   **75.4×** |
 
-Small fan-outs are noisy because fixed DO/RPC/loader dispatch cost is comparable to the CPU work. The curve becomes useful once per-task CPU dominates dispatch, with the latest fixed-cost run reaching **37.5× at N=256**. Full cold/warm split: [`bench-results-live.json`](bench-results-live.json).
+Small fan-outs are noisy because fixed DO/RPC/loader dispatch cost is comparable to the CPU work. The curve becomes useful once per-task CPU dominates dispatch, with the latest fixed-cost run reaching **75.4× at N=256**. Full cold/warm split: [`bench-results-live.json`](bench-results-live.json).
 
 **Where parallel CPU comes from.** Each leaf DO is a separate workerd process with its own V8 scheduler thread. The hybrid topology dispatches one job per leaf — N tasks land on N separate processes and execute concurrently. The tree topology recursively splits the fan-out so the per-coordinator RPC cap (default 32) doesn't bottleneck large workloads. Loaders *inside* a single workerd process share that process's V8 thread and serialize on CPU, so the library never bundles multiple jobs into one leaf — only DO count multiplies CPU.
 
