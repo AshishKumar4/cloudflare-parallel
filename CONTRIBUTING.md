@@ -39,10 +39,10 @@ bun x wrangler dev
 curl 'http://localhost:8787/?n=64'
 ```
 
-## Live prod tests against the deployed test worker
+## Live prod tests against the deployed Worker
 
-A test worker is already deployed at
-[`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev).
+The demo and test endpoints are deployed together at
+[`cloudflare-parallel.ashishkmr472.workers.dev`](https://cloudflare-parallel.ashishkmr472.workers.dev).
 Run the E2E + bench against it:
 
 ```bash
@@ -50,11 +50,11 @@ Run the E2E + bench against it:
 bun test tests/prod/cf-mp-vm.test.ts
 
 # Library E2E against the deployed test worker:
-CFP_E2E_TARGET=https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev \
+CFP_E2E_TARGET=https://cloudflare-parallel.ashishkmr472.workers.dev \
   bun run tests/prod/e2e-live.ts
 
 # Live edge bench (CPU-bound, every topology size):
-CFP_E2E_TARGET=https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev \
+CFP_E2E_TARGET=https://cloudflare-parallel.ashishkmr472.workers.dev \
   bun run tests/prod/bench-live.ts
 ```
 

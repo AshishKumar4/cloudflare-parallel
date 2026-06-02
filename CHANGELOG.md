@@ -66,9 +66,9 @@ cleanup pass with zero perf regressions:
   - Replaced `sub-coordinator.ts#balancedFillForTree` with
     `balancedFill` from `topology/plan.ts` (no cross-module cycle
     actually exists; the local copy was redundant).
-  - Hoisted `MAX_TRANSIENT_RETRIES = 2` and `transientBackoff()`
-    helper in `coordinator.ts`. Tree-dispatch retry and leaf-batch
-    retry both use them now.
+  - Extracted transient leaf-retry helpers into `coordinator/transient.ts`.
+    Tree-dispatch retry, sub-coordinator retry, and leaf-batch retry all
+    use the shared matcher/backoff now.
 - **Dead code removed**:
   - `src/config/` (doctor.ts + wrangler.ts) — the CLI it referenced
     was never built. All `cloudflare-parallel doctor` mentions purged
@@ -124,19 +124,20 @@ cleanup pass with zero perf regressions:
 
 Forensic audit of the dispatch path (see
 `/workspace/perf-audit-findings.md` for the full breakdown) identified
-five high-impact wins. Combined, they move large-N speedups
-dramatically:
+five high-impact wins. A later live-demo audit corrected the Mandelbrot
+benchmark so every tile has equal CPU cost; the current checked-in live
+curve is:
 
-| N | Pre-audit speedup | Post-audit speedup |
-|---:|---:|---:|
-| 4  | 3.3× | **3.1×** (Coordinator-hop bound; not fixable without splitting the API) |
-| 16 | 12.6× | **12.0×** |
-| 64 | 19.7× | **37.1×** (1.9× lift) |
-| 128 | 35.7× | **53.9×** (1.5× lift) |
-| 256 | 91.0× | **187.4×** (2.1× lift) |
-| 512 | 144.4× | **358.4×** (2.5× lift) |
+| N | Topology | Warm parallel | Sequential estimate | Speedup |
+|---:|---|---:|---:|---:|
+| 4 | hybrid | 1441 ms | 1.9 s | **1.3×** |
+| 16 | hybrid | 2149 ms | 7.8 s | **3.7×** |
+| 64 | tree `[8,8]` | 2409 ms | 32.1 s | **13.3×** |
+| 128 | tree `[8,16]` | 2975 ms | 61.1 s | **20.6×** |
+| 256 | tree `[8,32]` | 3326 ms | 124.9 s | **37.5×** |
 
-Mandelbrot workload, median-of-5 warm samples with WARMUP_RUNS=4.
+Mandelbrot fixed-cost workload, live Worker run from
+`2026-06-02T21:44:04.046Z` with WARMUP_RUNS=2 and SAMPLES=3.
 
 The fixes:
 
@@ -347,11 +348,9 @@ The fixes:
 - **Cache-key rotation regression** at `tests/unit/cache-key.test.ts`
   asserts that the new `'stable'` default produces exactly one cache
   key per fn shape across time (no LRU thrash).
-- **Live demo site** at [`cloudflare-parallel-demo.pages.dev`](https://cloudflare-parallel-demo.pages.dev)
-  — every primitive runnable as a CPU-bound interactive panel.
-- **Live test worker** at
-  [`cloudflare-parallel-prod-tests.ashishkmr472.workers.dev`](https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev).
-  Substrate validation + full library E2E run against this URL.
+- **Single live Worker** at
+  [`cloudflare-parallel.ashishkmr472.workers.dev`](https://cloudflare-parallel.ashishkmr472.workers.dev)
+  serves the static demo UI and the live primitive endpoints.
 - **CPU-vs-IO positioning** as a first-class invariant in `README.md`,
   `DESIGN.md`, and the new `docs/when-to-use.md`.
 - **Hero workloads** in the test worker:
@@ -475,4 +474,3 @@ Initial public release.
   in-memory ready set after backoff.
 - `bearerAuth` prefers `crypto.subtle.timingSafeEqual` when available;
   falls back to a hand-rolled XOR-OR loop.
-

@@ -4,12 +4,13 @@
  * the matcher conservative so user-thrown errors never get retried.
  */
 import { describe, expect, it } from 'bun:test';
-import { isTransientLeafError } from '../../src/coordinator/transient';
+import { hasTransientRunFailure, isTransientLeafError } from '../../src/coordinator/transient';
 
 describe('isTransientLeafError', () => {
   const TRANSIENT_FIXTURES = [
     'Internal error while starting up Durable Object storage caused object to be reset.',
     'caused object to be reset',
+    'Durable Object reset because its code was updated.',
     'Durable Object storage was reset',
     'Network connection lost.',
     'The script will never generate a response.',
@@ -40,8 +41,34 @@ describe('isTransientLeafError', () => {
 
   it('handles non-Error throwables', () => {
     expect(isTransientLeafError('caused object to be reset')).toBe(true);
-    expect(isTransientLeafError({ message: 'caused object to be reset' })).toBe(false);
+    expect(isTransientLeafError({ message: 'caused object to be reset' })).toBe(true);
     expect(isTransientLeafError(undefined)).toBe(false);
     expect(isTransientLeafError(null)).toBe(false);
+  });
+});
+
+describe('hasTransientRunFailure', () => {
+  it('detects transient failures returned in RunOneResult envelopes', () => {
+    expect(
+      hasTransientRunFailure([
+        { ok: true, value: 1 },
+        {
+          ok: false,
+          error: { name: 'Error', message: 'Network connection lost.' },
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  it('ignores successful and user-failure results', () => {
+    expect(
+      hasTransientRunFailure([
+        { ok: true, value: 1 },
+        {
+          ok: false,
+          error: { name: 'TypeError', message: 'cannot read property of undefined' },
+        },
+      ]),
+    ).toBe(false);
   });
 });

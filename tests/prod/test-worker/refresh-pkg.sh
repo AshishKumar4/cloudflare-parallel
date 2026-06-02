@@ -21,5 +21,8 @@ echo "==> rebuilt ${SCRIPT_DIR}/cloudflare-parallel-pkg.tgz"
 
 cd "$SCRIPT_DIR"
 rm -rf node_modules/cloudflare-parallel
-bun install
+bun install --frozen-lockfile
+rm -rf node_modules/cloudflare-parallel
+mkdir -p node_modules/cloudflare-parallel
+tar -xzf cloudflare-parallel-pkg.tgz -C node_modules/cloudflare-parallel --strip-components=1
 echo "==> reinstalled in test-worker"

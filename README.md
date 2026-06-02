@@ -469,28 +469,27 @@ const pool = Parallel.pool(env, {
 });
 ```
 
-The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed Worker with separate cold-run / warm-run reporting, equal warmup for both paths, and a median-of-5 sampling contract.
+The library publishes live edge benchmarks in [`bench-results-live.json`](bench-results-live.json), measured against the deployed Worker with separate cold-run / warm-run reporting, equal warmup for both paths, and the sampling details recorded in the JSON methodology block.
 
 ### Observed speedup curve
 
-Live numbers from the deployed Worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`). Numbers are warm (the auto-warm prewarm absorbs the cold-start path), separately reported cold vs warm in [`bench-results-live.json`](bench-results-live.json). Sequential baseline is the per-tile wall multiplied by N.
+Live numbers from the deployed Worker (Mandelbrot tile workload, heavy intensity — `rowsPerTile=8, maxIter=16000, width=1536`). Numbers are the corrected fixed-cost workload: every tile does the same CPU work, and the sequential baseline is the sampled per-tile wall time multiplied by N. Cold and warm runs are both recorded in [`bench-results-live.json`](bench-results-live.json).
 
 | Size | Topology         | Parallel wall (warm) | Sequential | **Speedup** |
 |-----:|------------------|---------------------:|-----------:|------------:|
-|    4 | `hybrid`         |               578 ms |    1.7 s   |    **3.0×** |
-|   16 | `hybrid`         |               594 ms |    6.8 s   |   **11.4×** |
-|   64 | `tree` `[8,8]`   |               753 ms |   27.3 s   |   **36.3×** |
-|  128 | `tree` `[8,16]`  |              1078 ms |   54.8 s   |   **50.8×** |
-|  256 | `tree` `[8,32]`  |               570 ms |  108.8 s   |  **190.9×** |
-|  512 | `tree` (depth 2) |               579 ms |  216.6 s   |  **374.0×** |
+|    4 | `hybrid`         |              1441 ms |    1.9 s   |    **1.3×** |
+|   16 | `hybrid`         |              2149 ms |    7.8 s   |    **3.7×** |
+|   64 | `tree` `[8,8]`   |              2409 ms |   32.1 s   |   **13.3×** |
+|  128 | `tree` `[8,16]`  |              2975 ms |   61.1 s   |   **20.6×** |
+|  256 | `tree` `[8,32]`  |              3326 ms |  124.9 s   |   **37.5×** |
 
-Heavy N-body GA fitness eval hits **33× at N=128**; Monte Carlo dart-throwing hits **11× at N=16** (Monte Carlo's per-task cost dwarfs dispatch overhead so the scaling matches Mandelbrot's). Full sweep + cold/warm split: [`bench-results-live.json`](bench-results-live.json).
+Small fan-outs are noisy because fixed DO/RPC/loader dispatch cost is comparable to the CPU work. The curve becomes useful once per-task CPU dominates dispatch, with the latest fixed-cost run reaching **37.5× at N=256**. Full cold/warm split: [`bench-results-live.json`](bench-results-live.json).
 
 **Where parallel CPU comes from.** Each leaf DO is a separate workerd process with its own V8 scheduler thread. The hybrid topology dispatches one job per leaf — N tasks land on N separate processes and execute concurrently. The tree topology recursively splits the fan-out so the per-coordinator RPC cap (default 32) doesn't bottleneck large workloads. Loaders *inside* a single workerd process share that process's V8 thread and serialize on CPU, so the library never bundles multiple jobs into one leaf — only DO count multiplies CPU.
 
 **Where the constants come from.** A `Pool` instance caches its Coordinator-DO stub. The Coordinator DO caches its leaf-DO stubs by stable leaf name (no re-`idFromName` per dispatch). The Coordinator fires `noop()` to each leaf the first time it's seen, in parallel with the real dispatch, so the leaf's DO-creation cost (~300-400 ms) is paid off the critical path. Single-job leaves take the in-DO fast path (no `forkCancelStream`, no `Promise.all([one])`). See [`/workspace/perf-audit-findings.md`](.) for the audit that drove these.
 
-The library scales close to linear from N=4 upward. At N=4 the ceiling is bounded by one extra Coordinator-DO RPC hop (vs raw direct-DO dispatch); from N=16 upward the parallel win dominates dramatically. N=512 hits 358× — the full leaf-count parallelism amortizes RPC overhead.
+This is not a linear-scaling guarantee. Warm trivial dispatch is usually tens to low hundreds of milliseconds, but edge scheduling, DO wakeups, deploy-time resets, and transient RPC failures can add multi-second variance. The library retries known transient DO failures, but speedups only become meaningful when each task has enough CPU work to amortize those fixed costs.
 
 ### Cache key strategy
 

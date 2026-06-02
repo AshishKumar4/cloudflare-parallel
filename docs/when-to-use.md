@@ -96,21 +96,18 @@ budget × 128 leaf DOs ≈ 64 minutes of compute available within a single
 The deployed Worker
 ([`cloudflare-parallel.ashishkmr472.workers.dev`](https://cloudflare-parallel.ashishkmr472.workers.dev))
 runs the same Mandelbrot CPU bench at every topology size. Current
-checked-in numbers are from `2026-05-11T04:06:48.661Z` in
+checked-in numbers are from `2026-06-02T21:44:04.046Z` in
 [`bench-results-live.json`](../bench-results-live.json):
 
 ```
-size=4    hybrid (4 leaves)        speedup ≈ 3.0×
-size=16   hybrid (16 leaves)       speedup ≈ 11.4×
-size=64   tree [8,8]               speedup ≈ 36.3×
-size=128  tree [8,16]              speedup ≈ 50.8×
-size=256  tree [8,32]              speedup ≈ 190.9×
-size=512  tree (depth 2)           speedup ≈ 374×
+size=4    hybrid (4 leaves)        speedup ≈ 1.3×
+size=16   hybrid (16 leaves)       speedup ≈ 3.7×
+size=64   tree [8,8]               speedup ≈ 13.3×
+size=128  tree [8,16]              speedup ≈ 20.6×
+size=256  tree [8,32]              speedup ≈ 37.5×
 ```
 
-These are honest numbers, measured warm-of-many on the live edge.
-Speedup at N=4 is bounded by per-leaf RPC dispatch overhead vs
-sequential's single-isolate hot path (≈3× matches the cf-mp-vm
-substrate's `parallel-diff` measurement of 4.07×, modulo library
-overhead). From N=16 upward the parallel win compounds linearly with
-leaf count.
+These are fixed-cost Mandelbrot tile numbers from the live edge. Small
+N is bounded by per-leaf RPC dispatch overhead and edge scheduling
+variance; the parallel win becomes meaningful once each task has enough
+CPU work to amortize dispatch.

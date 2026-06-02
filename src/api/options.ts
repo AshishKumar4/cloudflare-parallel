@@ -217,7 +217,10 @@ export interface PoolOptions<B = Record<string, unknown>, C = Record<string, unk
   observability?: ObservabilityOptions;
   /** Forwarded to every loaded isolate. See {@link WorkerCodeOptions}. */
   workerOptions?: WorkerCodeOptions;
-  /** Coordinator DO id. Default = a stable per-Worker id. */
+  /**
+   * Coordinator DO id. Default = a stable id scoped to the resolved
+   * `locationHint` when present, otherwise a global per-Worker id.
+   */
   coordinatorId?: string;
   /**
    * In-process coordinator loopback. Pass

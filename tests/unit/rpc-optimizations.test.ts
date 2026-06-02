@@ -14,12 +14,15 @@
  *    DO coordinator.
  */
 import { describe, expect, it } from 'bun:test';
-import { locationHintForColo } from '../../src/coordinator/internal';
+import { Pool } from '../../src/api/pool';
+import type { PoolEnv } from '../../src/api/options';
+import { getStub, locationHintForColo } from '../../src/coordinator/internal';
 import type {
   CoordinatorFanOutRequest,
   CoordinatorRunRequest,
   RunOneResult,
 } from '../../src/coordinator/protocol';
+import type { WorkerLoader } from '../../src/types';
 
 describe('locationHintForColo', () => {
   it('maps SFO to wnam', () => {
@@ -66,6 +69,106 @@ describe('locationHintForColo', () => {
 
   it('returns undefined for missing input', () => {
     expect(locationHintForColo(undefined)).toBeUndefined();
+  });
+});
+
+interface StubCall {
+  method: 'get' | 'getByName';
+  nameOrId: string;
+  opts: unknown;
+}
+
+function fakeLoader(): WorkerLoader {
+  return {
+    get: (() => {
+      throw new Error('LOADER.get unused in RPC optimization tests');
+    }) as unknown as WorkerLoader['get'],
+  } as unknown as WorkerLoader;
+}
+
+function fakeCoordinatorNamespace(calls: StubCall[]): DurableObjectNamespace {
+  const stub = {
+    runMany(req: CoordinatorFanOutRequest) {
+      return Promise.resolve({
+        results: req.argsList.map(() => ({ ok: true as const, value: 1 })),
+        topology: 'hybrid' as const,
+        fanOutPerLevel: [req.argsList.length],
+        treeDepth: 1,
+      });
+    },
+    runOne(): Promise<RunOneResult> {
+      return Promise.resolve({ ok: true, value: 1 });
+    },
+    async noop() {
+      return;
+    },
+  };
+  return {
+    idFromName: (name: string) => `id:${name}` as unknown as DurableObjectId,
+    newUniqueId: () => 'fake' as unknown as DurableObjectId,
+    idFromString: (s: string) => s as unknown as DurableObjectId,
+    get: ((id: unknown, opts?: unknown) => {
+      calls.push({ method: 'get', nameOrId: String(id), opts });
+      return stub as unknown as DurableObjectStub;
+    }) as unknown as DurableObjectNamespace['get'],
+    getByName: ((name: string, opts?: unknown) => {
+      calls.push({ method: 'getByName', nameOrId: name, opts });
+      return stub as unknown as DurableObjectStub;
+    }) as unknown as DurableObjectNamespace['getByName'],
+    jurisdiction: () => {
+      throw new Error('not implemented');
+    },
+  } as unknown as DurableObjectNamespace;
+}
+
+describe('Durable Object stub access', () => {
+  it('uses getByName with locationHint when the runtime exposes it', () => {
+    const calls: StubCall[] = [];
+    const ns = fakeCoordinatorNamespace(calls);
+
+    getStub(ns, 'coord-a', 'enam');
+
+    expect(calls).toEqual([
+      { method: 'getByName', nameOrId: 'coord-a', opts: { locationHint: 'enam' } },
+    ]);
+  });
+
+  it('Pool default coordinator id is scoped to the resolved location hint', async () => {
+    const calls: StubCall[] = [];
+    const env: PoolEnv = {
+      LOADER: fakeLoader(),
+      CfpCoordinator: fakeCoordinatorNamespace(calls),
+    };
+
+    const pool = new Pool(env, { requestColo: 'IAD', autoWarm: false });
+    await pool.map((x: number) => x, [1, 2]);
+
+    expect(calls[0]).toEqual({
+      method: 'getByName',
+      nameOrId: 'cfp:default:enam',
+      opts: { locationHint: 'enam' },
+    });
+  });
+
+  it('explicit Pool coordinatorId is preserved even when a location hint exists', async () => {
+    const calls: StubCall[] = [];
+    const env: PoolEnv = {
+      LOADER: fakeLoader(),
+      CfpCoordinator: fakeCoordinatorNamespace(calls),
+    };
+
+    const pool = new Pool(env, {
+      coordinatorId: 'custom-coord',
+      requestColo: 'IAD',
+      autoWarm: false,
+    });
+    await pool.map((x: number) => x, [1, 2]);
+
+    expect(calls[0]).toEqual({
+      method: 'getByName',
+      nameOrId: 'custom-coord',
+      opts: { locationHint: 'enam' },
+    });
   });
 });
 

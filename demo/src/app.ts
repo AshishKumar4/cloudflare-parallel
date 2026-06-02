@@ -80,6 +80,7 @@ interface MandelbrotOut {
   height: number;
   maxIter: number;
   tiles: number;
+  sampleTasks?: number;
   perTileSampleMs: number;
   topology: string;
   treeDepth: number;
@@ -177,13 +178,16 @@ async function runHero(): Promise<void> {
     const sample = await apiPost<MandelbrotOut>('/workload/mandelbrot', {
       mode: 'sequential-sample',
       tiles: heroSize,
+      fixedCost: true,
+      sampleTasks: Math.min(8, heroSize),
       ...preset,
     });
     const sampleClientMs = Math.round(performance.now() - tSample);
+    const sampleTasks = Math.max(1, sample.sampleTasks ?? 1);
     const perTileMs =
       sample.perTileSampleMs > 0
         ? sample.perTileSampleMs
-        : Math.max(1, sampleClientMs - 50);
+        : Math.max(1, Math.round((sampleClientMs - 50) / sampleTasks));
     const projectedSeqMs = perTileMs * heroSize;
     setText('hero-pertile', String(perTileMs));
     setText('hero-seq-ms', String(projectedSeqMs));
@@ -195,6 +199,7 @@ async function runHero(): Promise<void> {
     const par = await apiPost<MandelbrotOut>('/workload/mandelbrot', {
       mode: 'parallel',
       tiles: heroSize,
+      fixedCost: true,
       ...preset,
     });
     const parClientMs = Math.round(performance.now() - tPar);

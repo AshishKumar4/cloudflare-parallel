@@ -11,6 +11,12 @@ import { getStub } from './internal';
 import { balancedFill } from '../topology/plan';
 import { forkCancelStream } from '../transport/cancel-stream';
 import type { WorkerDOSession } from './worker-do';
+import {
+  hasTransientRunFailure,
+  isTransientLeafError,
+  MAX_TRANSIENT_RETRIES,
+  transientBackoff,
+} from './transient';
 
 /**
  * `CfpSubCoord` — Mid-tier of the hierarchical tree topology.
@@ -160,18 +166,32 @@ async function dispatchOnEnv(
           // Recurse into a deeper sub-coord with promise pipelining.
           const nextChildSizes = balancedFill(slice.length, branchingFactor);
           const subId = `${ownerId}-r${reqIdx}-sub-${i}`;
-          const stub = getStub<SubCoordStub>(env.CfpSubCoord, subId, request.locationHint);
-          const session = stub.openTreeSession();
-          const result = await session.dispatch({
-            ...request,
-            argsList: slice,
-            planChildSizes: nextChildSizes,
-            depth: depth - 1,
-            // Propagate the global slot base into the next tier.
-            taskSlotBase: slotBase,
-            cancelStream: childCancelStreams[i],
-          });
-          return result.results;
+          for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+            try {
+              const stub = getStub<SubCoordStub>(env.CfpSubCoord, subId, request.locationHint);
+              const session = stub.openTreeSession();
+              const result = await session.dispatch({
+                ...request,
+                argsList: slice,
+                planChildSizes: nextChildSizes,
+                depth: depth - 1,
+                // Propagate the global slot base into the next tier.
+                taskSlotBase: slotBase,
+                cancelStream: attempt === 0 ? childCancelStreams[i] : undefined,
+              });
+              if (hasTransientRunFailure(result.results) && attempt < MAX_TRANSIENT_RETRIES) {
+                await transientBackoff(attempt);
+                continue;
+              }
+              return result.results;
+            } catch (err) {
+              if (!isTransientLeafError(err) || attempt === MAX_TRANSIENT_RETRIES) {
+                return slice.map(() => errorToFailedResult(err));
+              }
+              await transientBackoff(attempt);
+            }
+          }
+          return slice.map(() => errorToFailedResult(new Error('sub-coord retry exhausted')));
         }
       } catch (err) {
         // Whole-slice failure: fan out the error across slice indices.
@@ -234,38 +254,48 @@ async function dispatchHybridLeaf(
   const leafResults = await Promise.all(
     leafBatches.map(
       async ({ args: batch, slotBase, leafName }, leafIdx): Promise<RunOneResult[]> => {
-        // F8: use the cached leaf stub.
-        let stub = owner.leafStubCache.get(leafName) as WorkerDOStub | undefined;
-        if (!stub) {
-          stub = getStub<WorkerDOStub>(env.CfpWorkerDO, leafName, request.locationHint);
-          owner.leafStubCache.set(leafName, stub as unknown as DurableObjectStub);
+        for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+          // F8: use the cached leaf stub. Invalidate it on retry because
+          // a transient reset can leave the routing handle stale.
+          if (attempt > 0) owner.leafStubCache.delete(leafName);
+          let stub = owner.leafStubCache.get(leafName) as WorkerDOStub | undefined;
+          if (!stub) {
+            stub = getStub<WorkerDOStub>(env.CfpWorkerDO, leafName, request.locationHint);
+            owner.leafStubCache.set(leafName, stub as unknown as DurableObjectStub);
+          }
+          try {
+            // Promise pipelining on the leaf DO.
+            const session = stub.openSession();
+            const result = await session.runBatch({
+              fnSource: request.fnSource,
+              fnHash: request.fnHash,
+              context: request.context,
+              workerOptions: request.workerOptions,
+              cacheKeyStrategy: request.cacheKeyStrategy,
+              allowList: request.allowList,
+              argsList: batch,
+              envelope: request.envelope,
+              freshIsolate: false,
+              // Global slot offset for this leaf. With one job per leaf
+              // `batch.length === 1`, but the indexing is preserved for
+              // multi-job batches (e.g. callers driving `runBatch` directly).
+              taskSlotBase: slotBase,
+              cancelStream: attempt === 0 ? leafCancelStreams[leafIdx] : undefined,
+            });
+            if (hasTransientRunFailure(result.results) && attempt < MAX_TRANSIENT_RETRIES) {
+              await transientBackoff(attempt);
+              continue;
+            }
+            return result.results;
+          } catch (err) {
+            owner.leafStubCache.delete(leafName);
+            if (!isTransientLeafError(err) || attempt === MAX_TRANSIENT_RETRIES) {
+              return batch.map(() => errorToFailedResult(err));
+            }
+            await transientBackoff(attempt);
+          }
         }
-        try {
-          // Promise pipelining on the leaf DO.
-          const session = stub.openSession();
-          const result = await session.runBatch({
-            fnSource: request.fnSource,
-            fnHash: request.fnHash,
-            context: request.context,
-            workerOptions: request.workerOptions,
-            cacheKeyStrategy: request.cacheKeyStrategy,
-            allowList: request.allowList,
-            argsList: batch,
-            envelope: request.envelope,
-            freshIsolate: false,
-            // Global slot offset for this leaf. With one job per leaf
-            // `batch.length === 1`, but the indexing is preserved for
-            // multi-job batches (e.g. callers driving `runBatch` directly).
-            taskSlotBase: slotBase,
-            cancelStream: leafCancelStreams[leafIdx],
-          });
-          return result.results;
-        } catch (err) {
-          // Invalidate cached stub on error — may be a transient leaf
-          // reset and the routing handle is stale.
-          owner.leafStubCache.delete(leafName);
-          return batch.map(() => errorToFailedResult(err));
-        }
+        return batch.map(() => errorToFailedResult(new Error('leaf retry exhausted')));
       },
     ),
   );

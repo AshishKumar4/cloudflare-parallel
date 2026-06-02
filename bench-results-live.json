@@ -1,9 +1,9 @@
 {
   "target": "https://cloudflare-parallel.ashishkmr472.workers.dev",
-  "ts": "2026-05-11T04:06:48.661Z",
+  "ts": "2026-06-02T21:44:04.046Z",
   "methodology": {
-    "warmupRuns": 8,
-    "samples": 5,
+    "warmupRuns": 2,
+    "samples": 3,
     "coldDefinition": "first measured run after warmup — captures any per-call dispatch cost not amortized by warmup",
     "warmDefinition": "median of remaining samples after the cold run — steady-state throughput",
     "sequentialDefinition": "per-task wall-clock from a single inline run (sequential-sample mode), multiplied by N",
@@ -14,13 +14,10 @@
     16,
     64,
     128,
-    256,
-    512
+    256
   ],
   "workloads": [
-    "mandelbrot",
-    "montecarlo",
-    "ga"
+    "mandelbrot"
   ],
   "aggregates": [
     {
@@ -31,19 +28,17 @@
       "fanOutPerLevel": [
         4
       ],
-      "parallelColdMs": 583,
+      "parallelColdMs": 613,
       "parallelWarmRuns": [
-        595,
-        582,
-        569,
-        573
+        663,
+        2219
       ],
-      "parallelWarmMs": 578,
-      "parallelOverallMedianMs": 582,
-      "sequentialExtrapolatedMs": 1712,
-      "speedup": 2.96,
-      "speedupColdParallel": 2.94,
-      "perTaskSampleMs": 428
+      "parallelWarmMs": 1441,
+      "parallelOverallMedianMs": 663,
+      "sequentialExtrapolatedMs": 1918,
+      "speedup": 1.33,
+      "speedupColdParallel": 3.13,
+      "perTaskSampleMs": 479.5
     },
     {
       "workload": "mandelbrot",
@@ -53,19 +48,17 @@
       "fanOutPerLevel": [
         16
       ],
-      "parallelColdMs": 587,
+      "parallelColdMs": 1757,
       "parallelWarmRuns": [
-        558,
-        555,
-        629,
-        640
+        1743,
+        2555
       ],
-      "parallelWarmMs": 594,
-      "parallelOverallMedianMs": 587,
-      "sequentialExtrapolatedMs": 6784,
-      "speedup": 11.42,
-      "speedupColdParallel": 11.56,
-      "perTaskSampleMs": 424
+      "parallelWarmMs": 2149,
+      "parallelOverallMedianMs": 1757,
+      "sequentialExtrapolatedMs": 7846,
+      "speedup": 3.65,
+      "speedupColdParallel": 4.47,
+      "perTaskSampleMs": 490.375
     },
     {
       "workload": "mandelbrot",
@@ -76,19 +69,17 @@
         8,
         8
       ],
-      "parallelColdMs": 755,
+      "parallelColdMs": 2117,
       "parallelWarmRuns": [
-        998,
-        710,
-        731,
-        775
+        1866,
+        2951
       ],
-      "parallelWarmMs": 753,
-      "parallelOverallMedianMs": 755,
-      "sequentialExtrapolatedMs": 27328,
-      "speedup": 36.29,
-      "speedupColdParallel": 36.2,
-      "perTaskSampleMs": 427
+      "parallelWarmMs": 2409,
+      "parallelOverallMedianMs": 2117,
+      "sequentialExtrapolatedMs": 32096,
+      "speedup": 13.32,
+      "speedupColdParallel": 15.16,
+      "perTaskSampleMs": 501.5
     },
     {
       "workload": "mandelbrot",
@@ -99,19 +90,17 @@
         8,
         16
       ],
-      "parallelColdMs": 1059,
+      "parallelColdMs": 1980,
       "parallelWarmRuns": [
-        1120,
-        1059,
-        1030,
-        1097
+        1830,
+        4120
       ],
-      "parallelWarmMs": 1078,
-      "parallelOverallMedianMs": 1059,
-      "sequentialExtrapolatedMs": 54784,
-      "speedup": 50.82,
-      "speedupColdParallel": 51.73,
-      "perTaskSampleMs": 428
+      "parallelWarmMs": 2975,
+      "parallelOverallMedianMs": 1980,
+      "sequentialExtrapolatedMs": 61136,
+      "speedup": 20.55,
+      "speedupColdParallel": 30.88,
+      "perTaskSampleMs": 477.625
     },
     {
       "workload": "mandelbrot",
@@ -122,43 +111,17 @@
         8,
         32
       ],
-      "parallelColdMs": 569,
+      "parallelColdMs": 2637,
       "parallelWarmRuns": [
-        566,
-        568,
-        571,
-        572
+        2919,
+        3732
       ],
-      "parallelWarmMs": 570,
-      "parallelOverallMedianMs": 569,
-      "sequentialExtrapolatedMs": 108800,
-      "speedup": 190.88,
-      "speedupColdParallel": 191.21,
-      "perTaskSampleMs": 425
-    },
-    {
-      "workload": "mandelbrot",
-      "size": 512,
-      "topology": "tree",
-      "treeDepth": 2,
-      "fanOutPerLevel": [
-        8,
-        8,
-        8
-      ],
-      "parallelColdMs": 590,
-      "parallelWarmRuns": [
-        560,
-        586,
-        585,
-        572
-      ],
-      "parallelWarmMs": 579,
-      "parallelOverallMedianMs": 585,
-      "sequentialExtrapolatedMs": 216576,
-      "speedup": 374.05,
-      "speedupColdParallel": 367.08,
-      "perTaskSampleMs": 423
+      "parallelWarmMs": 3326,
+      "parallelOverallMedianMs": 2919,
+      "sequentialExtrapolatedMs": 124864,
+      "speedup": 37.54,
+      "speedupColdParallel": 47.35,
+      "perTaskSampleMs": 487.75
     }
   ]
 }

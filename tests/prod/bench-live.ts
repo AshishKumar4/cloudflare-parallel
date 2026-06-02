@@ -2,8 +2,8 @@
 /**
  * Live edge bench harness.
  *
- * Drives the deployed `cloudflare-parallel-prod-tests` worker through the
- * four hero workloads at every topology-relevant size, with separate
+ * Drives the deployed `cloudflare-parallel` Worker through the
+ * hero workloads at every topology-relevant size, with separate
  * cold-run / warm-run reporting and equal warmup for both paths. Outputs
  * to `bench-results-live.json` so the demo site can render the results.
  *
@@ -40,7 +40,7 @@
 import { writeFileSync } from 'node:fs';
 
 const TARGET =
-  process.env.CFP_E2E_TARGET ?? 'https://cloudflare-parallel-prod-tests.ashishkmr472.workers.dev';
+  process.env.CFP_E2E_TARGET ?? 'https://cloudflare-parallel.ashishkmr472.workers.dev';
 
 // Sizes / samples / warmup runs are configurable via env so bench runs
 // can be scoped down for quick directional checks (e.g.
@@ -61,6 +61,7 @@ interface BaseResponse {
   topology: string;
   treeDepth: number;
   fanOutPerLevel: number[];
+  sampleTasks?: number;
   perTaskSampleMs?: number;
   perTileSampleMs?: number;
 }
@@ -139,8 +140,13 @@ const WORKLOADS: WorkloadConfig[] = [
     // The bench only needs timings; the iters array is opt-in via
     // `includeIters: true` (default `false`) and would otherwise hit
     // the 32 MiB RPC payload cap at N ≥ 256.
-    parallelBody: (n) => ({ mode: 'parallel', tiles: n }),
-    sequentialSampleBody: (n) => ({ mode: 'sequential-sample', tiles: n }),
+    parallelBody: (n) => ({ mode: 'parallel', tiles: n, fixedCost: true }),
+    sequentialSampleBody: (n) => ({
+      mode: 'sequential-sample',
+      tiles: n,
+      fixedCost: true,
+      sampleTasks: Math.min(8, n),
+    }),
     hasSequentialSample: true,
   },
   {
@@ -236,7 +242,9 @@ async function runOne(cfg: WorkloadConfig, size: number): Promise<Aggregate> {
       // fall back to `ms`, then to client RT.
       const tileMs = (r as MandelbrotResponse).perTileSampleMs ?? 0;
       const taskMs = (r as MonteCarloResponse | GaResponse).perTaskSampleMs ?? 0;
-      const sample = tileMs > 0 ? tileMs : taskMs > 0 ? taskMs : honestMs(r.ms, r._clientRtMs);
+      const sampleCount = Math.max(1, r.sampleTasks ?? 1);
+      const sample =
+        tileMs > 0 ? tileMs : taskMs > 0 ? taskMs : honestMs(r.ms, r._clientRtMs) / sampleCount;
       seqSamples.push(sample);
     }
     perTaskSampleMs = median(seqSamples);
@@ -264,16 +272,21 @@ async function runOne(cfg: WorkloadConfig, size: number): Promise<Aggregate> {
 }
 
 async function main(): Promise<void> {
-  console.log(`==> live edge bench against ${TARGET}`);
-  console.log(`==> ${WORKLOADS.length} workloads × ${SIZES.length} sizes × ${SAMPLES} samples`);
-  console.log(`==> warmup=${WARMUP_RUNS} runs/size, separate cold/warm reporting\n`);
-
-  const aggregates: Aggregate[] = [];
   const filterSet = WORKLOAD_FILTER
     ? new Set(WORKLOAD_FILTER.split(',').map((s) => s.trim()))
     : null;
-  for (const cfg of WORKLOADS) {
-    if (filterSet && !filterSet.has(cfg.workload)) continue;
+  const activeWorkloads = filterSet
+    ? WORKLOADS.filter((cfg) => filterSet.has(cfg.workload))
+    : WORKLOADS;
+
+  console.log(`==> live edge bench against ${TARGET}`);
+  console.log(
+    `==> ${activeWorkloads.length} workloads × ${SIZES.length} sizes × ${SAMPLES} samples`,
+  );
+  console.log(`==> warmup=${WARMUP_RUNS} runs/size, separate cold/warm reporting\n`);
+
+  const aggregates: Aggregate[] = [];
+  for (const cfg of activeWorkloads) {
     console.log(`-- workload=${cfg.workload}`);
     for (const size of SIZES) {
       try {
@@ -309,7 +322,7 @@ async function main(): Promise<void> {
         'The Workers runtime throttles Date.now() for timing-attack mitigation; sub-second wall-clock falls back to client RT',
     },
     sizes: SIZES,
-    workloads: WORKLOADS.map((w) => w.workload),
+    workloads: activeWorkloads.map((w) => w.workload),
     aggregates,
   };
   writeFileSync('bench-results-live.json', JSON.stringify(out, null, 2));

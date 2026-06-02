@@ -44,6 +44,10 @@ import { bindingAllowList, pickBindings } from './bindings';
 
 const DEFAULT_COORDINATOR_NAME = 'cfp:default';
 
+function defaultCoordinatorName(locationHint: LocationHint | undefined): string {
+  return locationHint ? `${DEFAULT_COORDINATOR_NAME}:${locationHint}` : DEFAULT_COORDINATOR_NAME;
+}
+
 interface FanOutResponse {
   results: RunOneResult[];
   topology: 'in-do' | 'hybrid' | 'tree';
@@ -271,8 +275,8 @@ export class Pool<
     }
     this.#env = env;
     this.#opts = opts;
-    this.#coordinatorName = opts.coordinatorId ?? DEFAULT_COORDINATOR_NAME;
     this.#locationHint = opts.locationHint ?? locationHintForColo(opts.requestColo);
+    this.#coordinatorName = opts.coordinatorId ?? defaultCoordinatorName(this.#locationHint);
     this.#inProcess = opts.inProcess;
     this.#autoWarm = opts.autoWarm ?? true;
   }

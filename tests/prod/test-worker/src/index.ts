@@ -360,6 +360,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         cx?: number;
         cy?: number;
         zoom?: number;
+        fixedCost?: boolean;
+        sampleTasks?: number;
         /**
          * When `true`, the response includes the full iteration count
          * for every pixel — needed only by an interactive image
@@ -377,7 +379,6 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       // the cardioid interior) ≈ 800–900 ms per tile on edge CPU.
       // Validated against the live edge bench.
       const rowsPerTile = Math.max(1, Math.min(body.rowsPerTile ?? 12, 64));
-      const height = body.height ?? tiles * rowsPerTile;
       const maxIter = Math.min(body.maxIter ?? 20000, 100000);
       // Full set, modest zoom — interior pixels dominate iteration cost.
       const cx = body.cx ?? -0.5;
@@ -385,6 +386,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       const zoom = body.zoom ?? 350;
       const mode = body.mode ?? 'parallel';
       const includeIters = body.includeIters ?? false;
+      const fixedCost = body.fixedCost ?? !includeIters;
+      const height = fixedCost ? rowsPerTile : (body.height ?? tiles * rowsPerTile);
+      const sampleTasks = Math.max(1, Math.min(body.sampleTasks ?? 4, tiles));
 
       // Slice the image into `tiles` horizontal slabs. `rowsPerTile`
       // is already validated above; the height was either passed
@@ -408,11 +412,32 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         includeIters: boolean;
       };
       const slabs: TileSpec[] = [];
-      for (let i = 0; i < tiles; i++) {
-        const y0 = i * rowsPerTile;
-        const y1 = Math.min(height, y0 + rowsPerTile);
-        if (y0 >= y1) break;
-        slabs.push({ idx: i, y0, y1, width, height, maxIter, cx, cy, zoom, includeIters });
+      if (fixedCost) {
+        // Benchmark mode: every task renders the same center slab, so
+        // per-task CPU is constant as fan-out size changes. This keeps
+        // speedup math honest. The visual Mandelbrot renderer lives on
+        // `/demo/mandelbrot`; this endpoint is a CPU workload.
+        for (let i = 0; i < tiles; i++) {
+          slabs.push({
+            idx: i,
+            y0: 0,
+            y1: rowsPerTile,
+            width,
+            height,
+            maxIter,
+            cx,
+            cy,
+            zoom,
+            includeIters,
+          });
+        }
+      } else {
+        for (let i = 0; i < tiles; i++) {
+          const y0 = i * rowsPerTile;
+          const y1 = Math.min(height, y0 + rowsPerTile);
+          if (y0 >= y1) break;
+          slabs.push({ idx: i, y0, y1, width, height, maxIter, cx, cy, zoom, includeIters });
+        }
       }
 
       // Closure-free user fn — all params come from `slab`. The return
@@ -473,7 +498,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         for (const s of slabs) result.push(renderTile(s));
         stats = { topology: 'sequential', treeDepth: 0, fanOutPerLevel: [] };
       } else if (mode === 'sequential-sample') {
-        // Render the MIDDLE tile, return its result + iteration sum.
+        // Render a small number of representative tiles sequentially.
         // Server-side timing (`Date.now()` / `performance.now()`) is
         // throttled by the Workers runtime to coarse resolution for
         // sub-second windows (timing-attack mitigation), so we cannot
@@ -482,17 +507,18 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         // intra-region edge baseline (~50 ms) gives an honest per-
         // tile estimate.
         //
-        // Picking the MIDDLE slab is important for Mandelbrot: the
-        // first tile covers the image top, which sits outside the
-        // set (every pixel escapes in a few iterations), so its CPU
-        // is dominated by escape time and dramatically
-        // under-represents the average tile cost. The middle tile
-        // crosses the cardioid where most pixels iterate to maxIter.
-        const sampleIdx = Math.floor(slabs.length / 2);
-        const sampleSlab = slabs[sampleIdx];
-        const sampleResult = renderTile(sampleSlab);
+        // In fixed-cost mode every slab is equivalent, so sampling the
+        // first N slabs is representative and amortizes HTTP overhead.
+        // In image-slab mode, sample around the center where the
+        // cardioid dominates; callers should not use that shape for
+        // speedup claims because average tile cost varies with image
+        // extent.
+        const start = fixedCost
+          ? 0
+          : Math.max(0, Math.floor(slabs.length / 2) - Math.floor(sampleTasks / 2));
+        const sampled = slabs.slice(start, Math.min(slabs.length, start + sampleTasks));
+        for (const sampleSlab of sampled) result.push(renderTile(sampleSlab));
         perTileSampleMs = 0; // signal to client: use client RT
-        result.push(sampleResult);
         stats = { topology: 'sequential-sample', treeDepth: 0, fanOutPerLevel: [] };
       } else {
         // Note on `freshIsolate`: empirically tested with both
@@ -522,6 +548,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         height,
         maxIter,
         tiles: slabs.length,
+        sampleTasks: mode === 'sequential-sample' ? result.length : 0,
+        fixedCost,
         cx,
         cy,
         zoom,

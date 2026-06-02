@@ -74,9 +74,9 @@ export type LocationHint = 'wnam' | 'enam' | 'sam' | 'weur' | 'eeur' | 'apac' | 
  * library uses this to colocate freshly-created leaf DOs with the request's
  * incoming colo. Hints are best-effort — see the docs link above.
  *
- * The map is intentionally small (top colos by traffic share) and falls
- * through to `wnam` for unknowns. Users wanting precise control should
- * pass `locationHint` via `PoolOptions`.
+ * The map is intentionally small (top colos by traffic share) and omits
+ * the hint for unknowns. Users wanting precise control should pass
+ * `locationHint` via `PoolOptions`.
  */
 const COLO_TO_REGION: Record<string, LocationHint> = {
   // North America (west)
@@ -191,14 +191,22 @@ export function getStub<T>(
   name: string,
   locationHint?: LocationHint,
 ): DurableObjectStub & T {
-  const id = ns.idFromName(name);
-  // Cloudflare's TS types accept `{ locationHint }` only in some declarations
-  // depending on @cloudflare/workers-types version — the runtime accepts it
-  // unconditionally. Cast the options through `unknown` so we work against
-  // older type packages without losing the runtime hint.
   const opts = locationHint
     ? ({ locationHint } as unknown as DurableObjectNamespaceGetDurableObjectOptions)
     : undefined;
+  const nsWithGetByName = ns as DurableObjectNamespace & {
+    getByName?: (
+      name: string,
+      opts?: DurableObjectNamespaceGetDurableObjectOptions,
+    ) => DurableObjectStub;
+  };
+  if (typeof nsWithGetByName.getByName === 'function') {
+    const stub = opts ? nsWithGetByName.getByName(name, opts) : nsWithGetByName.getByName(name);
+    return stub as DurableObjectStub & T;
+  }
+  const id = ns.idFromName(name);
+  // Older local test/runtime shims may not expose `getByName`; keep the
+  // idFromName/get fallback while still forwarding the runtime hint.
   const stub = opts
     ? (
         ns as DurableObjectNamespace & {

@@ -16,7 +16,12 @@ import { getStub, wireToWorkerOptions, type LocationHint } from './internal';
 import { forkCancelStream } from '../transport/cancel-stream';
 // Transient-error matchers live in a standalone module so unit tests
 // don't have to load `cloudflare:workers` to exercise them.
-import { isTransientLeafError } from './transient';
+import {
+  hasTransientRunFailure,
+  isTransientLeafError,
+  MAX_TRANSIENT_RETRIES,
+  transientBackoff,
+} from './transient';
 import type { WorkerDOSession } from './worker-do';
 
 /**
@@ -96,29 +101,6 @@ export interface CoordinatorFanOutRequest {
 
 const ACTOR_STATE_KEY = 'cfp:actor-state';
 const ACTOR_INITIALIZED_KEY = 'cfp:actor-initialized';
-
-/**
- * Maximum retries on transient platform errors (DO reset, "Network
- * connection lost") across both the leaf-batch dispatch and the
- * sub-coord tree-dispatch paths.
- */
-const MAX_TRANSIENT_RETRIES = 2;
-
-/**
- * Jittered backoff between transient-retry attempts.
- *
- *   attempt=0 → 100..250 ms
- *   attempt=1 → 250..400 ms
- *   attempt=2 → 400..550 ms
- *
- * Spreads the retry burst across a few hundred ms so the runtime sees
- * a sustained ramp rather than a thundering herd.
- */
-function transientBackoff(attempt: number): Promise<void> {
-  const base = 100 + attempt * 150;
-  const jitter = Math.random() * 150;
-  return new Promise((resolve) => setTimeout(resolve, base + jitter));
-}
 
 export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
   /**
@@ -525,6 +507,11 @@ export class CfpCoordinator extends DurableObject<CoordinatorEnv> {
             const result = await session.dispatch(
               buildReq(attempt === 0 ? childStreams[subIdx] : undefined),
             );
+            if (hasTransientRunFailure(result.results) && attempt < MAX_TRANSIENT_RETRIES) {
+              this.#subCoordStubCache.delete(subName);
+              await transientBackoff(attempt);
+              continue;
+            }
             return result.results;
           } catch (err) {
             if (!isTransientLeafError(err) || attempt === MAX_TRANSIENT_RETRIES) {
@@ -684,18 +671,17 @@ function planFanOutPerLevel(plan: TopologyPlan): number[] {
 }
 
 /**
- * Invoke `runBatch` on a leaf DO with up to 2 auto-retries on transient
+ * Invoke `runBatch` on a leaf DO with a small retry budget for transient
  * platform errors. Each retry uses a fresh stub (a runtime-reset DO is
  * effectively dead until re-addressed) and waits a small jittered
  * backoff so a thundering herd of fresh-DO creations doesn't slam the
  * runtime in lockstep. Empirically resolves the vast majority of the
  * "object to be reset" failures observed at large fan-out sizes (N≥256).
  *
- * Why two retries: a single retry is enough on a quiescent platform,
- * but under heavy concurrent DO creation (e.g. a bench burst right at
- * the size cliff) the runtime occasionally hits the transient twice in
- * a row. Two retries × N leaves running in parallel is bounded
- * cost — the worst case is `2 × backoff_max = ~600 ms` added wall.
+ * The retry budget is intentionally small and bounded: under heavy
+ * concurrent DO creation (e.g. a bench burst right at the size cliff)
+ * the runtime can hit multiple transient resets in a row, but retries
+ * still run in parallel across leaves and add only jittered wall time.
  */
 async function invokeLeafBatchWithRetry(
   stubFactory: (refresh: boolean) => WorkerDOStub,
@@ -736,6 +722,10 @@ async function invokeLeafBatchWithRetry(
       // the fan-out", which is true at the retry boundary (a leaf reset
       // means nothing got delivered).
       const result = await session.runBatch(buildBatch(attempt === 0 ? cancelStream : undefined));
+      if (hasTransientRunFailure(result.results) && attempt < MAX_TRANSIENT_RETRIES) {
+        await transientBackoff(attempt);
+        continue;
+      }
       return result.results;
     } catch (err) {
       if (!isTransientLeafError(err) || attempt === MAX_TRANSIENT_RETRIES) throw err;
