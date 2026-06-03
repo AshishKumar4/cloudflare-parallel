@@ -50,13 +50,13 @@ describe('integration: topology end-to-end', () => {
     expect(body.leafShape).toEqual(new Array(20).fill(1));
   });
 
-  it('size=200 tree depth=2 with F=8', async () => {
+  it('size=200 tree uses the default wide one-level tree', async () => {
     await probe;
     if (!serverAlive) return;
     const res = await fetch(`${BASE}/_test/tree?n=200`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { results: unknown[]; treeDepth: number };
     expect(body.results.length).toBe(200);
-    expect(body.treeDepth).toBeGreaterThanOrEqual(2);
+    expect(body.treeDepth).toBe(1);
   });
 });

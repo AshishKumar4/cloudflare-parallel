@@ -160,8 +160,8 @@
             <tr data-size="4"><td>4</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>4 leaf DOs (one job each)</td><td>4</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
             <tr data-size="32"><td>32</td><td><span class="topo-badge topo-hybrid">hybrid</span></td><td>32 leaf DOs (one job each)</td><td>32</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
             <tr data-size="128"><td>128</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=1, F=8 (root → 8 sub-coords → 16 leaves each)</td><td>128</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
-            <tr data-size="256"><td>256</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=2, F=8 (root → 8 sub-coords → 32 leaves each)</td><td>256</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
-            <tr data-size="512"><td>512</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=2, F=8 (root → 8 sub-coords → 64 leaves each, capped at maxFanOut)</td><td>512</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="256"><td>256</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=1, F=8 (root → 8 sub-coords → 32 leaves each)</td><td>256</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
+            <tr data-size="512"><td>512</td><td><span class="topo-badge topo-tree">tree</span></td><td>K=2, F=8 (root → 8 sub-coords → 8 sub-coords each → 8 leaves each)</td><td>512</td><td><button class="topo-run">Run</button> <span class="topo-out">—</span></td></tr>
           </tbody>
         </table>
       </section>
@@ -293,7 +293,7 @@ await pool.submit(longLoop, iters, { cancel });
           The honest curve. Each row: Mandelbrot tile renders over N
           parallel V8 isolates vs the sequential per-tile baseline ×N.
           Speedup grows with size as the per-call dispatch floor
-          amortizes; tree topology kicks in at 256.
+          amortizes; tree topology kicks in above 32.
         </p>
         <table class="bench-table" id="bench-table">
           <thead>

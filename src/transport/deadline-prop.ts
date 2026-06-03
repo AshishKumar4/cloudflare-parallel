@@ -53,7 +53,7 @@ export function buildEnvelope(opts: {
 
 /**
  * Minimum effective deadline budget given tree depth (per-hop ~50ms typical
- * skew × 2 for budget). At K=4 with F=8 the 5-hop chain wants ~500ms+ floor.
+ * skew × 2 for budget). At K=4 the 5-hop chain wants ~500ms+ floor.
  */
 function computeMinBudget(treeDepth: number): number {
   if (treeDepth <= 1) return MIN_DEADLINE_BUDGET_MS;

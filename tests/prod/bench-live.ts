@@ -10,7 +10,7 @@
  * Methodology (rewritten after a third-party review flagged the prior
  * harness as "70% bench-methodology bug + 30% real cold-start"):
  *
- *   1. **Equal warmup.** Before measuring either path, run two throwaway
+ *   1. **Equal warmup.** Before measuring either path, run several throwaway
  *      iterations of BOTH the parallel and sequential-sample endpoints at
  *      the size in question. This burns the coordinator-DO spin-up, the
  *      LRU loader cache primer, and any first-RPC `getActor` resolution.
@@ -50,7 +50,7 @@ const SIZES = (process.env.CFP_BENCH_SIZES ?? '4,16,64,128,256,512')
   .map((s) => Number(s.trim()))
   .filter((s) => Number.isFinite(s) && s > 0);
 const SAMPLES = Number(process.env.CFP_BENCH_SAMPLES ?? 5);
-const WARMUP_RUNS = Number(process.env.CFP_BENCH_WARMUP ?? 2);
+const WARMUP_RUNS = Number(process.env.CFP_BENCH_WARMUP ?? 5);
 const WORKLOAD_FILTER = (process.env.CFP_BENCH_WORKLOADS ?? '').trim();
 const FETCH_TIMEOUT_MS = 180_000;
 

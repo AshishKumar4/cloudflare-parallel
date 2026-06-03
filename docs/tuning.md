@@ -8,7 +8,7 @@ Knobs you can turn to adapt the runtime to your workload.
 | ------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `topology`                      | `'auto'`       | Pin to `'in-do' \| 'hybrid' \| 'tree'` for predictable latency. `'auto'` is best for variable input sizes. `'in-do'` only accepts size ≤ 1.          |
 | `maxFanOut`                     | `32`           | Per-coordinator RPC fan-out cap. Hybrid topology can dispatch up to this many leaf DOs in one Promise.all turn; sizes above auto-promote to tree.   |
-| `branchingFactor`               | `8`            | Tree fan-out width per level. `4` for narrower trees (more depth, less coordinator pressure); `16` for wider (less depth, more leaves).             |
+| `branchingFactor`               | `8`            | Tree fan-out width per level. Raise it only after benchmarking a workload that benefits from a wider first tier.                                  |
 | `treeThreshold`                 | `maxFanOut`    | Size at which auto-selector promotes from hybrid to tree. Defaults to `maxFanOut`. Raise (and `maxFanOut`) together to keep larger fan-outs flat.   |
 | `cacheKeyStrategy`              | `'stable'`     | Default uses `cfp:<fnHash>:slot-<i>` — one isolate per (fn shape, slot). Same slot across calls reuses the same warm isolate; distinct slots within a fan-out give each task its own V8 heap (memory isolation). Use `'fresh'` only when you need a clean heap per call (testing, distrusted code). `'auto'` (60s windows) is opt-in for deployments with a small fixed set of shapes that want periodic refresh. |
 | `autoWarm`                      | `true`         | When `true`, the first submit fires `Coordinator.noop()` in parallel with the real dispatch — absorbs the ~300–400 ms DO cold-start off the critical path. Set to `false` only when benchmarking cold-start specifically. Validated 14×–140× per-call speedup. |
@@ -56,7 +56,7 @@ SQLite-backed SchedulerDO store.
 ## Sizing the Worker
 
 For a Pool processing 1000 items at peak:
-- `'auto'` → tree (branchingFactor=8, K=2) → root → 8 sub-coords → 8 leaves each → **1000 leaf DOs** (one job each).
+- `'auto'` → tree (branchingFactor=8, K=2) → root → 8 sub-coords → 8 sub-coords each → about 16 leaves each → **1000 leaf DOs** (one job each).
 - Each leaf DO is a separate workerd process with its own V8 scheduler
   thread; CPU parallelism scales with leaf count.
 - Worker request total wall = max(per-isolate CPU) + (K+1) × DO RPC hop.

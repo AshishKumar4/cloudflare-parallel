@@ -37,6 +37,7 @@
  */
 
 import { Parallel, CancelToken, bearerAuth, type WorkerLoader } from 'cloudflare-parallel';
+import type { PoolOptions } from 'cloudflare-parallel';
 export {
   CfpCoordinator,
   CfpWorkerDO,
@@ -63,6 +64,11 @@ interface CtxWithExports extends ExecutionContext {
     CfpInProcessCoordinator?: unknown;
   };
 }
+
+type BenchSelectorOptions = Pick<
+  PoolOptions<Env>,
+  'topology' | 'maxFanOut' | 'branchingFactor' | 'treeThreshold'
+>;
 
 // CORS stays permissive so local demo builds and remote E2E probes can
 // call this Worker directly. The production demo is served from the
@@ -99,10 +105,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       | NonNullable<Parameters<typeof Parallel.pool>[1]>['inProcess']
       | undefined;
     const requestColo = (req as Request & { cf?: { colo?: string } }).cf?.colo;
-    const pool = Parallel.pool(env, {
-      inProcess,
-      requestColo,
-    });
+    const makePool = (selector?: BenchSelectorOptions) =>
+      Parallel.pool(env, {
+        inProcess,
+        requestColo,
+        ...selector,
+      });
+    const pool = makePool();
 
     // ---- Pool primitives ----
     if (path === '/pool/submit' && req.method === 'POST') {
@@ -115,9 +124,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
     if (path === '/pool/map' && req.method === 'POST') {
       const t0 = Date.now();
-      const { items } = (await req.json()) as { items: number[] };
-      const out = await pool.map((n: number) => n * n, items);
-      const stats = await pool.stats();
+      const { items, selector } = (await req.json()) as {
+        items: number[];
+        selector?: BenchSelectorOptions;
+      };
+      const selectedPool = selector ? makePool(selector) : pool;
+      const out = await selectedPool.map((n: number) => n * n, items);
+      const stats = await selectedPool.stats();
       return Response.json({
         out,
         ms: Date.now() - t0,
@@ -371,7 +384,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
          * needs timings.
          */
         includeIters?: boolean;
+        selector?: BenchSelectorOptions;
       };
+      const selectedPool = body.selector ? makePool(body.selector) : pool;
       const width = Math.min(body.width ?? 1920, 4096);
       const tiles = Math.min(body.tiles ?? 128, 512);
       // Fix per-tile rows so per-tile CPU is constant as N grows.
@@ -531,8 +546,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         // job at a time, so the cache is pure warm-reuse with no
         // contention. `freshIsolate: true` pays loader spin-up per
         // call (~1s) which outweighs everything for warm workloads.
-        result = await pool.map(renderTile, slabs);
-        const s = await pool.stats();
+        result = await selectedPool.map(renderTile, slabs);
+        const s = await selectedPool.stats();
         stats = {
           topology: s.topology,
           treeDepth: s.treeDepth,
